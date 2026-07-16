@@ -58,7 +58,7 @@ function DayPills({ trip, activeDay, setActiveDay }: { trip: Trip; activeDay: nu
 function RouteMap({ trip, activeDay, onSelect }: { trip: Trip; activeDay: number; onSelect: (item: ItineraryItem) => void }) {
   const allItems = trip.itinerary.filter((item) => item.day === activeDay);
   const points = allItems.map((item) => `${item.location.x},${item.location.y}`).join(' ');
-  return <div className="paper-grid relative min-h-[360px] overflow-hidden rounded-[28px] border border-[#d9ded8] bg-[#e9f0ec]">
+  return <><div className="paper-grid relative min-h-[360px] overflow-hidden rounded-[28px] border border-[#d9ded8] bg-[#e9f0ec]">
     <div className="absolute -left-10 top-7 h-48 w-72 rotate-[-10deg] rounded-[50%] bg-[#c4d8c8] opacity-65" />
     <div className="absolute -right-16 bottom-0 h-72 w-80 rotate-[20deg] rounded-[45%] bg-[#c6d9c6] opacity-70" />
     <div className="absolute left-[11%] top-[19%] h-[2px] w-[79%] rotate-[12deg] bg-white/70" />
@@ -75,7 +75,14 @@ function RouteMap({ trip, activeDay, onSelect }: { trip: Trip; activeDay: number
         <span className="pointer-events-none absolute left-5 top-1/2 hidden w-32 -translate-y-1/2 rounded-lg bg-ink px-2.5 py-2 text-[10px] font-semibold leading-tight text-white shadow-xl group-hover:block"><span className="block text-white/60">{meta.label} · {item.time}</span>{item.title}</span>
       </button>;
     })}
-  </div>;
+  </div><LiveGoogleMap /></>;
+}
+
+function LiveGoogleMap() {
+  const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
+  if (!key || key.includes('PASTE_YOUR') || key.includes('your_key')) return null;
+  const src = `https://www.google.com/maps/embed/v1/directions?key=${encodeURIComponent(key)}&origin=Tokyo%2C%20Japan&destination=Kyoto%2C%20Japan&mode=transit`;
+  return <section className="mt-4 overflow-hidden rounded-[28px] border border-stone-200 bg-white"><div className="flex items-center justify-between gap-3 px-5 py-4"><div><p className="eyebrow">Live map view</p><h3 className="mt-1 text-lg font-bold text-ink">Tokyo → Kyoto, on Google Maps</h3></div><a href="https://www.google.com/maps/dir/Tokyo,+Japan/Kyoto,+Japan" target="_blank" rel="noreferrer" className="text-xs font-bold text-moss hover:text-ink">Open full map ↗</a></div><iframe title="Google Maps directions from Tokyo to Kyoto" src={src} className="h-64 w-full border-0 sm:h-80" loading="lazy" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen /></section>;
 }
 
 function Timeline({ items, compact = false }: { items: ItineraryItem[]; compact?: boolean }) {
