@@ -8,7 +8,7 @@ export class SabreService {
   constructor(private readonly fixtures: { flights: Flight[]; hotels: Hotel[] }) {}
 
   async searchFlights(params: { origin?: string; destination?: string; departureDate?: string }): Promise<Flight[]> {
-    if (config.mockMode || !config.sabre.clientId || !config.sabre.clientSecret) return this.fixtures.flights;
+    if (config.mockMode || !config.sabre.eprUsername || !config.sabre.eprPassword) return this.fixtures.flights;
     const token = await this.token();
     const search = new URLSearchParams({ originLocationCode: params.origin ?? 'SFO', destinationLocationCode: params.destination ?? 'TYO', departureDate: params.departureDate ?? '2026-10-12', adults: '4', currencyCode: 'USD', max: '6' });
     const response = await fetch(`${config.sabre.baseUrl}/v2/shop/flights?${search}`, { headers: { Authorization: `Bearer ${token}` } });
@@ -18,7 +18,7 @@ export class SabreService {
   }
 
   async searchHotels(params: { cityCode?: string; checkInDate?: string; checkOutDate?: string }): Promise<Hotel[]> {
-    if (config.mockMode || !config.sabre.clientId || !config.sabre.clientSecret) return this.fixtures.hotels;
+    if (config.mockMode || !config.sabre.eprUsername || !config.sabre.eprPassword) return this.fixtures.hotels;
     // Sabre hotel endpoints vary by contracted API package. Keep this call isolated
     // and normalize the shared output before UI consumption.
     const token = await this.token();
@@ -44,9 +44,9 @@ export class SabreService {
   private async createToken(): Promise<string> {
     // Sabre OAuth v2 expects each credential to be Base64 encoded before the
     // combined client-id:client-secret value is encoded for HTTP Basic auth.
-    const clientId = Buffer.from(String(config.sabre.clientId), 'utf8').toString('base64');
-    const clientSecret = Buffer.from(String(config.sabre.clientSecret), 'utf8').toString('base64');
-    const basicAuth = Buffer.from(`${clientId}:${clientSecret}`, 'utf8').toString('base64');
+    const username = Buffer.from(String(config.sabre.eprUsername), 'utf8').toString('base64');
+    const password = Buffer.from(String(config.sabre.eprPassword), 'utf8').toString('base64');
+    const basicAuth = Buffer.from(`${username}:${password}`, 'utf8').toString('base64');
     const response = await fetch(`${config.sabre.baseUrl}/${config.sabre.oauthVersion}/auth/token`, {
       method: 'POST',
       headers: { Authorization: `Basic ${basicAuth}`, 'Content-Type': 'application/x-www-form-urlencoded' },

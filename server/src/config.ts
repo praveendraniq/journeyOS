@@ -13,9 +13,11 @@ export const config = {
   clientOrigin: process.env.CLIENT_ORIGIN ?? 'http://localhost:5173',
   mockMode: bool(process.env.MOCK_MODE, true),
   sabre: {
-    clientId: process.env.SABRE_CLIENT_ID,
-    clientSecret: process.env.SABRE_CLIENT_SECRET,
-    baseUrl: process.env.SABRE_BASE_URL ?? 'https://api-crt.cert.havail.sabre.com',
+    // OAuth v2 Test credentials are shown in Dev Studio as User ID / Password.
+    // The old CLIENT_* aliases remain supported for existing local setups.
+    eprUsername: process.env.SABRE_EPR_USERNAME ?? process.env.SABRE_CLIENT_ID,
+    eprPassword: process.env.SABRE_EPR_PASSWORD ?? process.env.SABRE_CLIENT_SECRET,
+    baseUrl: process.env.SABRE_BASE_URL ?? 'https://api.cert.platform.sabre.com',
     pcc: sabrePcc,
     oauthVersion: sabreOauthVersion,
   },

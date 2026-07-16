@@ -39,7 +39,7 @@ export const createApp = () => {
       mockMode: config.mockMode,
       integrations: {
         vocalBridge: Boolean(config.vocalBridge.apiKey),
-        sabre: Boolean(config.sabre.clientId && config.sabre.clientSecret),
+        sabre: Boolean(config.sabre.eprUsername && config.sabre.eprPassword),
         paypal: Boolean(config.paypal.clientId && config.paypal.clientSecret),
       },
     }),
