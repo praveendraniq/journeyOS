@@ -37,6 +37,11 @@ pnpm lint
 4. In Operations Center, trigger **Running late +90m** and then **Heavy rain**.
 5. Watch the route, itinerary, budget, and Travel DNA update.
 
+## Stretch goals
+
+- **Local mobility booking:** recommend a rental car for trip duration when flights do not reach the destination directly, and offer per-day rideshare deep links for selected itinerary stops.
+- **Voice guide at every stop:** add a play button beside each itinerary item that speaks a concise, source-backed fact and practical visiting tip for that attraction.
+
 ### Test with real voice
 
 Open the app in Chrome or Edge, select **Voice planner**, click the microphone, and allow microphone access when prompted. Speak the request naturally, review the live transcript, then click **Create my trip brief**. Browsers without the Web Speech API can still use the editable transcript field.

@@ -42,6 +42,16 @@ const itineraryFor = (destination: string, duration: number): ItineraryItem[] =>
     route('yellowstone-lamar', 3, '06:30', 'Lamar Valley wildlife watch', 'Lamar Valley · Yellowstone', 'nature', 120, 55, 35, 55, 'upcoming', true),
     route('yellowstone-mammoth', 3, '13:30', 'Mammoth Hot Springs', 'Mammoth · Yellowstone', 'nature', 100, 35, 52, 43, 'upcoming', true),
   ].filter((item) => item.day <= duration);
+  if (place.includes('lake tahoe') || place.includes('tahoe')) return [
+    route('tahoe-arrival', 1, '10:00', 'Arrive in South Lake Tahoe', 'South Lake Tahoe, California', 'transport', 20, 45, 75, 50, 'current'),
+    route('tahoe-heavenly', 1, '13:00', 'Heavenly Gondola', 'Heavenly Mountain Resort, South Lake Tahoe', 'experience', 90, 25, 54, 50, 'upcoming', true),
+    route('tahoe-lakeside', 1, '18:00', 'Lakeside sunset walk', 'Lakeside Beach, South Lake Tahoe', 'nature', 70, 15, 66, 58, 'upcoming', true),
+    route('tahoe-emerald', 2, '09:00', 'Emerald Bay overlook', 'Emerald Bay State Park, California', 'nature', 85, 35, 34, 52, 'upcoming', true),
+    route('tahoe-vikingsholm', 2, '12:00', 'Vikingsholm Castle', 'Vikingsholm, Emerald Bay State Park', 'culture', 90, 18, 55, 62, 'upcoming', true),
+    route('tahoe-eagle-falls', 2, '16:00', 'Eagle Falls trail', 'Eagle Falls Trailhead, California', 'nature', 95, 12, 63, 42, 'upcoming', true),
+    route('tahoe-sand-harbor', 3, '09:00', 'Sand Harbor beach', 'Sand Harbor State Park, Nevada', 'nature', 100, 40, 47, 60, 'upcoming', true),
+    route('tahoe-incline', 3, '14:00', 'Incline Village food stop', 'Incline Village, Nevada', 'food', 80, 20, 65, 45, 'upcoming'),
+  ].filter((item) => item.day <= duration);
   if (place.includes('india')) return [
     route('india-arrival', 1, '14:00', 'Arrive in Delhi', 'Delhi · India', 'transport', 20, 45, 75, 50, 'current'),
     route('india-market', 1, '18:00', 'Old Delhi food walk', 'Chandni Chowk · Delhi', 'food', 55, 58, 75, 90, 'upcoming'),
@@ -209,13 +219,15 @@ export class DemoStore {
   }
 
   private setBookingOptions(destination: string) {
-    const isYellowstone = destination.toLowerCase().includes('yellowstone') || destination.toLowerCase().includes('yellow stone');
-    const arrival = isYellowstone ? 'BZN' : destination.slice(0, 3).toUpperCase();
-    const hotelName = isYellowstone ? 'Canyon Lodge & Cabins' : `${destination} Explorer Lodge`;
-    const location = isYellowstone ? 'Canyon Village · Yellowstone' : `Central ${destination}`;
+    const place = destination.toLowerCase();
+    const isYellowstone = place.includes('yellowstone') || place.includes('yellow stone');
+    const isTahoe = place.includes('lake tahoe') || place.includes('tahoe');
+    const arrival = isYellowstone ? 'BZN' : isTahoe ? 'RNO' : destination.slice(0, 3).toUpperCase();
+    const hotelName = isYellowstone ? 'Canyon Lodge & Cabins' : isTahoe ? 'Basecamp Tahoe South' : `${destination} Explorer Lodge`;
+    const location = isYellowstone ? 'Canyon Village · Yellowstone' : isTahoe ? 'South Lake Tahoe · California' : `Central ${destination}`;
     this.trip.flights = [
-      { id: 'f-primary', airline: isYellowstone ? 'United' : 'Journey Air', code: isYellowstone ? 'UA 2146' : 'JO 101', departure: 'SFO', arrival, departureTime: '08:10', arrivalTime: '11:42', price: 390, duration: '3h 32m', stops: 0, selected: true },
-      { id: 'f-value', airline: isYellowstone ? 'Delta' : 'Journey Air', code: isYellowstone ? 'DL 1862' : 'JO 205', departure: 'SFO', arrival, departureTime: '10:20', arrivalTime: '14:35', price: 335, duration: '4h 15m', stops: 1 },
+      { id: 'f-primary', airline: isYellowstone ? 'United' : isTahoe ? 'Alaska' : 'Journey Air', code: isYellowstone ? 'UA 2146' : isTahoe ? 'AS 3381' : 'JO 101', departure: 'SFO', arrival, departureTime: '08:10', arrivalTime: '11:42', price: 390, duration: '3h 32m', stops: 0, selected: true },
+      { id: 'f-value', airline: isYellowstone ? 'Delta' : isTahoe ? 'Southwest' : 'Journey Air', code: isYellowstone ? 'DL 1862' : isTahoe ? 'WN 2674' : 'JO 205', departure: 'SFO', arrival, departureTime: '10:20', arrivalTime: '14:35', price: 335, duration: '4h 15m', stops: 1 },
     ];
     this.trip.hotels = [
       { id: 'h-primary', name: hotelName, location, rating: 4.6, price: 290, totalPrice: 580, image: 'Primary stay', amenities: ['Central location', 'Breakfast'], selected: true },

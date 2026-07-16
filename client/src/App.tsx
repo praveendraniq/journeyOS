@@ -83,7 +83,7 @@ function LiveGoogleMap({ trip, activeDay }: { trip: Trip; activeDay: number }) {
   const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
   if (!key || key.includes('PASTE_YOUR') || key.includes('your_key')) return null;
   const stops = trip.itinerary.filter((item) => item.day === activeDay);
-  const locations = stops.map((item) => `${item.title}, ${trip.request.destination}`);
+  const locations = stops.map((item) => item.subtitle || `${item.title}, ${trip.request.destination}`);
   const origin = locations[0] ?? trip.request.destination;
   const destination = locations[locations.length - 1] ?? trip.request.destination;
   const waypoints = locations.slice(1, -1).join('|');
@@ -129,7 +129,7 @@ function TripOverview({ trip, setPage, activeDay, setActiveDay, onReceipt }: { t
 
 function VoicePlanner({ trip, onTrip }: { trip: Trip; onTrip: (trip: Trip, note: string) => void }) {
   const sampleVoiceCommand = 'Plan a 5-day Japan trip for four people under $6,000. We love temples, food, history, and photography.';
-  const [conversation, setConversation] = useState(sampleVoiceCommand);
+  const [conversation, setConversation] = useState(() => `Plan a ${trip.request.duration}-day ${trip.request.destination} trip for ${trip.request.travelers} people under $${trip.request.budget.toLocaleString()}. We love ${trip.request.interests.join(', ')}.`);
   const [listening, setListening] = useState(false);
   const [speechStatus, setSpeechStatus] = useState('Tap the microphone and allow access when your browser asks.');
   const [loading, setLoading] = useState(false);
@@ -214,6 +214,7 @@ function VoicePlanner({ trip, onTrip }: { trip: Trip; onTrip: (trip: Trip, note:
     try {
       const response = await api.extractPlan(conversation);
       setResult(response);
+      setConversation(`Plan a ${response.request.duration}-day ${response.request.destination} trip for ${response.request.travelers} people under $${response.request.budget.toLocaleString()}. We love ${response.request.interests.join(', ')}.`);
       onTrip(response.trip, 'Voice brief structured into a living trip plan.');
     } catch (error) { onTrip(trip, error instanceof Error ? error.message : 'Could not extract that trip request.'); }
     finally { setLoading(false); }
