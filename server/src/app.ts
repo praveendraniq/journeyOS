@@ -12,6 +12,7 @@ import type { PaymentOrder, TripEvent } from './types.js';
 
 const replanSchema = z.object({ type: z.enum(['late', 'rain', 'flight-delay', 'closed', 'tired']) });
 const requestSchema = z.object({ conversation: z.string().min(3).max(1000) });
+const preferenceCollectionSchema = z.object({ adminName: z.string().min(2).max(60), adminPhone: z.string().min(7).max(30), phones: z.record(z.string(), z.string().min(7).max(30)) });
 const selectionSchema = z.object({ id: z.string().min(1) });
 const receiptSchema = z.object({ amount: z.number().positive().optional(), restaurant: z.string().min(1).optional(), fileName: z.string().optional() });
 
@@ -37,6 +38,15 @@ export const createApp = () => {
       const result = await planner.extractTrip(conversation);
       const trip = store.updateFromRequest(result.request);
       res.json({ ...result, trip, summary: `${result.request.duration} days in ${result.request.destination} for ${result.request.travelers} travelers, with a $${result.request.budget.toLocaleString()} budget.` });
+    } catch (error) { next(error); }
+  });
+  app.post('/api/planner/collect-preferences', async (req, res, next) => {
+    try {
+      const input = preferenceCollectionSchema.parse(req.body);
+      const currentTrip = store.getTrip();
+      const collection = await planner.collectPreferences({ ...input, travelers: currentTrip.travelers, destination: currentTrip.request.destination });
+      const trip = store.applyPreferenceCollection(collection);
+      res.json({ collection, trip });
     } catch (error) { next(error); }
   });
 

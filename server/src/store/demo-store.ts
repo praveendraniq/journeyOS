@@ -1,4 +1,4 @@
-import type { GroupPreference, Interest, ItineraryItem, Trip, TripEvent, Traveler } from '../types.js';
+import type { GroupPreference, Interest, ItineraryItem, PreferenceCollection, Trip, TripEvent, Traveler } from '../types.js';
 
 const interests = (scores: Partial<Record<Interest, number>>): Record<Interest, number> => ({
   culture: 2, history: 2, food: 2, photography: 2, shopping: 2, nightlife: 2, nature: 2, ...scores,
@@ -64,6 +64,17 @@ export class DemoStore {
   }
 
   getTrip(): Trip { return structuredClone(this.trip); }
+
+  applyPreferenceCollection(collection: PreferenceCollection): Trip {
+    this.trip.preferenceCollection = collection;
+    this.trip.groupPreference = {
+      ...this.trip.groupPreference,
+      recommendedPace: 'Admin-led balanced discovery',
+      explanation: `${collection.adminName}'s priorities receive a 1.5× planning weight. ${collection.negotiation}`,
+    };
+    this.trip.events.unshift({ id: `preferences-${Date.now()}`, type: 'tired', title: 'Group preferences collected', createdAt: new Date().toISOString(), explanation: collection.approvalSummary });
+    return this.getTrip();
+  }
 
   selectFlight(flightId: string): Trip {
     this.trip.flights = this.trip.flights.map((flight) => ({ ...flight, selected: flight.id === flightId }));

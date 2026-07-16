@@ -1,5 +1,5 @@
 import { config } from '../config.js';
-import type { Interest, TripRequest } from '../types.js';
+import type { Interest, PreferenceCollection, Traveler, TripRequest } from '../types.js';
 
 const defaultRequest: TripRequest = {
   destination: 'Japan', duration: 5, travelers: 4, budget: 6000,
@@ -50,5 +50,46 @@ export class VocalBridgeService {
     if (/fast|packed|adventure/.test(value)) request.travelStyle = 'high-energy exploration';
     if (/vegetarian|vegan/.test(value)) request.foodPreferences = ['vegetarian friendly', ...request.foodPreferences.filter((food) => food !== 'vegetarian friendly')];
     return { request, source: 'mock', confidence: 0.94 };
+  }
+
+  async collectPreferences(input: { adminName: string; adminPhone: string; phones: Record<string, string>; travelers: Traveler[]; destination: string }): Promise<PreferenceCollection> {
+    const participants = input.travelers.filter((traveler) => traveler.name !== input.adminName);
+    if (!config.mockMode && config.vocalBridge.baseUrl && config.vocalBridge.apiKey) {
+      const response = await fetch(`${config.vocalBridge.baseUrl.replace(/\/$/, '')}/v1/calls/group-preferences`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.vocalBridge.apiKey}` },
+        body: JSON.stringify({
+          admin: { name: input.adminName, phone: input.adminPhone, priorityWeight: 1.5 },
+          destination: input.destination,
+          travelers: participants.map((traveler) => ({ id: traveler.id, name: traveler.name, phone: input.phones[traveler.id] })),
+          prompt: 'Discuss the planned trip, ask for priorities and constraints, and suggest a fair compromise that preserves the admin’s priorities first.',
+        }),
+      });
+      if (!response.ok) throw new Error(`Vocal Bridge returned ${response.status}`);
+      const body = await response.json() as Partial<PreferenceCollection>;
+      if (body.calls?.length) return { ...body, adminName: input.adminName, adminWeight: body.adminWeight ?? 1.5, source: 'vocal-bridge', negotiation: body.negotiation ?? 'Preferences collected for review.', approvalSummary: body.approvalSummary ?? 'Review the proposed group plan.' } as PreferenceCollection;
+    }
+
+    const calls = participants.map((traveler, index) => {
+      const priorities = Object.entries(traveler.interests).sort(([, a], [, b]) => b - a).slice(0, 2).map(([interest]) => interest);
+      return {
+        travelerId: traveler.id,
+        name: traveler.name,
+        phone: input.phones[traveler.id] || (index === 0 ? '+1 (415) 555-0148' : index === 1 ? '+1 (415) 555-0172' : '+1 (415) 555-0196'),
+        status: 'completed' as const,
+        summary: `${traveler.name} wants ${priorities.join(' and ')}, with a ${traveler.pacePreference} pace and ${traveler.foodPreference.toLowerCase()} options.`,
+        happiness: [88, 84, 86][index] ?? 85,
+        topPriorities: priorities,
+        compromise: `Keeps a ${priorities[0]} highlight while reserving open time for ${input.adminName}'s culture-led itinerary.`,
+      };
+    });
+    return {
+      adminName: input.adminName,
+      adminWeight: 1.5,
+      source: 'mock',
+      calls,
+      negotiation: `${input.adminName}'s culture and history priorities lead the plan. The group accepts a balanced pace, with food, photography, and nature moments placed near the core cultural route.`,
+      approvalSummary: `A ${input.destination} plan is ready: it protects ${input.adminName}'s top priorities while keeping every traveler at 84% happiness or above.`,
+    };
   }
 }
