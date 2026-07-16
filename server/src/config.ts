@@ -1,6 +1,10 @@
 import 'dotenv/config';
 
 const bool = (value: string | undefined, fallback: boolean) => value === undefined ? fallback : value === 'true';
+const sabrePcc = (process.env.SABRE_PCC ?? 'S5OM').toUpperCase();
+
+if (sabrePcc === 'S50M') throw new Error('Invalid Sabre hackathon PCC S50M. Use S5OM with the uppercase letter O.');
+if (!/^[A-Z0-9]{4}$/.test(sabrePcc)) throw new Error('SABRE_PCC must be a four-character uppercase Sabre PCC.');
 
 export const config = {
   port: Number(process.env.PORT ?? 8787),
@@ -10,6 +14,7 @@ export const config = {
     clientId: process.env.SABRE_CLIENT_ID,
     clientSecret: process.env.SABRE_CLIENT_SECRET,
     baseUrl: process.env.SABRE_BASE_URL ?? 'https://api.cert.platform.sabre.com',
+    pcc: sabrePcc,
   },
   paypal: {
     clientId: process.env.PAYPAL_CLIENT_ID,
