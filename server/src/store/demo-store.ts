@@ -30,8 +30,18 @@ const itinerary: ItineraryItem[] = [
   route('i-kiyomizu', 5, '09:30', 'Kiyomizu-dera', 'Higashiyama · Kyoto', 'culture', 105, 25, 51, 31, 'upcoming', true),
 ];
 
-const itineraryFor = (destination: string): ItineraryItem[] => {
+const itineraryFor = (destination: string, duration: number): ItineraryItem[] => {
   const place = destination.toLowerCase();
+  if (place.includes('yellowstone')) return [
+    route('yellowstone-arrival', 1, '10:00', 'Arrive at Yellowstone', 'West Entrance · Yellowstone National Park', 'transport', 20, 45, 75, 50, 'current'),
+    route('yellowstone-grand-prismatic', 1, '13:00', 'Grand Prismatic Spring', 'Midway Geyser Basin · Yellowstone', 'nature', 85, 30, 55, 58, 'upcoming', true),
+    route('yellowstone-old-faithful', 1, '17:00', 'Old Faithful & Upper Geyser Basin', 'Old Faithful · Yellowstone', 'nature', 100, 24, 65, 35, 'upcoming', true),
+    route('yellowstone-hayden', 2, '06:30', 'Hayden Valley wildlife drive', 'Hayden Valley · Yellowstone', 'nature', 110, 40, 43, 54, 'upcoming', true),
+    route('yellowstone-canyon', 2, '11:30', 'Grand Canyon of the Yellowstone', 'Canyon Village · Yellowstone', 'nature', 105, 27, 58, 43, 'upcoming', true),
+    route('yellowstone-artist-point', 2, '16:00', 'Artist Point sunset', 'South Rim · Yellowstone', 'experience', 75, 18, 65, 35, 'upcoming', true),
+    route('yellowstone-lamar', 3, '06:30', 'Lamar Valley wildlife watch', 'Lamar Valley · Yellowstone', 'nature', 120, 55, 35, 55, 'upcoming', true),
+    route('yellowstone-mammoth', 3, '13:30', 'Mammoth Hot Springs', 'Mammoth · Yellowstone', 'nature', 100, 35, 52, 43, 'upcoming', true),
+  ].filter((item) => item.day <= duration);
   if (place.includes('india')) return [
     route('india-arrival', 1, '14:00', 'Arrive in Delhi', 'Delhi · India', 'transport', 20, 45, 75, 50, 'current'),
     route('india-market', 1, '18:00', 'Old Delhi food walk', 'Chandni Chowk · Delhi', 'food', 55, 58, 75, 90, 'upcoming'),
@@ -42,7 +52,7 @@ const itineraryFor = (destination: string): ItineraryItem[] => {
     route('india-bazaar', 4, '10:00', 'Jaipur artisan bazaar', 'Jaipur · India', 'experience', 90, 55, 42, 62, 'upcoming'),
     route('india-palace', 4, '15:30', 'Amber Fort', 'Jaipur · India', 'culture', 105, 35, 32, 42, 'upcoming', true),
     route('india-farewell', 5, '18:00', 'Farewell dinner', 'Jaipur · India', 'food', 100, 25, 60, 70, 'upcoming'),
-  ];
+  ].filter((item) => item.day <= duration);
   return [
     route('arrival', 1, '14:00', `Arrive in ${destination}`, `${destination}`, 'transport', 20, 45, 75, 50, 'current'),
     route('welcome', 1, '18:00', 'Neighborhood welcome dinner', `${destination}`, 'food', 55, 58, 75, 90, 'upcoming'),
@@ -51,7 +61,7 @@ const itineraryFor = (destination: string): ItineraryItem[] => {
     route('daytrip', 3, '09:00', 'Scenic day trip', `${destination}`, 'nature', 150, 20, 62, 80, 'upcoming', true),
     route('culture', 4, '10:00', 'Culture and craft trail', `${destination}`, 'experience', 105, 35, 32, 42, 'upcoming'),
     route('farewell', 5, '18:00', 'Farewell dinner', `${destination}`, 'food', 100, 25, 60, 70, 'upcoming'),
-  ];
+  ].filter((item) => item.day <= duration);
 };
 
 const groupPreference: GroupPreference = {
@@ -117,7 +127,8 @@ export class DemoStore {
   updateFromRequest(request: Trip['request']): Trip {
     this.trip.request = { ...this.trip.request, ...request };
     this.trip.name = `${request.destination}, together`;
-    this.trip.itinerary = itineraryFor(request.destination);
+    this.trip.itinerary = itineraryFor(request.destination, request.duration);
+    this.setBookingOptions(request.destination);
     this.trip.events = [{ id: `brief-${Date.now()}`, type: 'tired', title: `${request.destination} trip brief created`, createdAt: new Date().toISOString(), explanation: `Your ${request.duration}-day ${request.destination} itinerary is ready to review. Every page now reflects this proposed trip.` }];
     this.trip.groupPreference = { ...this.trip.groupPreference, explanation: `The ${request.destination} route prioritizes ${request.interests.slice(0, 3).join(', ')} while keeping the group’s preferred pace.` };
     this.trip.preferenceCollection = undefined;
@@ -195,6 +206,22 @@ export class DemoStore {
   private move(id: string, day: number, time: string, status: ItineraryItem['status']) {
     const item = this.trip.itinerary.find((entry) => entry.id === id);
     if (item) Object.assign(item, { day, time, status });
+  }
+
+  private setBookingOptions(destination: string) {
+    const isYellowstone = destination.toLowerCase().includes('yellowstone');
+    const arrival = isYellowstone ? 'BZN' : destination.slice(0, 3).toUpperCase();
+    const hotelName = isYellowstone ? 'Canyon Lodge & Cabins' : `${destination} Explorer Lodge`;
+    const location = isYellowstone ? 'Canyon Village · Yellowstone' : `Central ${destination}`;
+    this.trip.flights = [
+      { id: 'f-primary', airline: isYellowstone ? 'United' : 'Journey Air', code: isYellowstone ? 'UA 2146' : 'JO 101', departure: 'SFO', arrival, departureTime: '08:10', arrivalTime: '11:42', price: 390, duration: '3h 32m', stops: 0, selected: true },
+      { id: 'f-value', airline: isYellowstone ? 'Delta' : 'Journey Air', code: isYellowstone ? 'DL 1862' : 'JO 205', departure: 'SFO', arrival, departureTime: '10:20', arrivalTime: '14:35', price: 335, duration: '4h 15m', stops: 1 },
+    ];
+    this.trip.hotels = [
+      { id: 'h-primary', name: hotelName, location, rating: 4.6, price: 290, totalPrice: 580, image: 'Primary stay', amenities: ['Central location', 'Breakfast'], selected: true },
+      { id: 'h-value', name: `${destination} Basecamp`, location, rating: 4.4, price: 220, totalPrice: 440, image: 'Value stay', amenities: ['Parking', 'Local shuttle'] },
+    ];
+    this.recalculateBudget(390 * this.trip.request.travelers, 580);
   }
 
   private recalculateBudget(flight: number, hotel: number) {
