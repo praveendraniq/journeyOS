@@ -141,11 +141,17 @@ function VoicePlanner({ trip, onTrip }: { trip: Trip; onTrip: (trip: Trip, note:
   const [phones, setPhones] = useState<Record<string, string>>({ 't-marcus': '+1 (415) 555-0148', 't-leila': '+1 (415) 555-0172', 't-jon': '+1 (415) 555-0196' });
   const [collecting, setCollecting] = useState(false);
   const [reviewTab, setReviewTab] = useState<'plan' | 'people'>('plan');
+  const [chunkSeconds, setChunkSeconds] = useState(0);
+  const [chunkNumber, setChunkNumber] = useState(1);
+  const [needsContinue, setNeedsContinue] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const mockVoiceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const chunkTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const chunkBaseRef = useRef('');
   const speechSupported = typeof window !== 'undefined' && Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
 
   const startListening = () => {
+    const append = needsContinue;
     if (listening) {
       if (recognitionRef.current) recognitionRef.current.stop();
       if (mockVoiceTimeoutRef.current) {
@@ -158,11 +164,13 @@ function VoicePlanner({ trip, onTrip }: { trip: Trip; onTrip: (trip: Trip, note:
     }
     const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
     if (!Recognition) {
-      setConversation('');
+      if (!append) setConversation('');
+      setNeedsContinue(false);
+      setChunkNumber((current) => append ? current + 1 : 1);
       setListening(true);
       setSpeechStatus('This preview has no microphone API, so JourneyOS is simulating a voice command…');
       mockVoiceTimeoutRef.current = setTimeout(() => {
-        setConversation(sampleVoiceCommand);
+        setConversation((current) => append ? `${current.trim()} ${sampleVoiceCommand}` : sampleVoiceCommand);
         setListening(false);
         setSpeechStatus('Mock voice captured. Review the transcript, then create the trip brief.');
         mockVoiceTimeoutRef.current = null;
@@ -176,14 +184,18 @@ function VoicePlanner({ trip, onTrip }: { trip: Trip; onTrip: (trip: Trip, note:
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
     recognition.onstart = () => {
-      setConversation('');
+      if (!append) setConversation('');
+      chunkBaseRef.current = append ? `${conversation.trim()} ` : '';
+      setNeedsContinue(false);
+      setChunkNumber((current) => append ? current + 1 : 1);
+      setChunkSeconds(0);
       setListening(true);
       setSpeechStatus('Listening now — describe the trip in one natural sentence.');
     };
     recognition.onresult = (event) => {
       let transcript = '';
       for (let index = 0; index < event.results.length; index += 1) transcript += event.results[index][0]?.transcript ?? '';
-      setConversation(transcript.trim());
+      setConversation(`${chunkBaseRef.current}${transcript}`.trim());
       setSpeechStatus(event.results[event.results.length - 1]?.isFinal ? 'Voice captured. Review the transcript, then create the trip brief.' : 'Transcribing…');
     };
     recognition.onerror = (event) => {
@@ -198,6 +210,10 @@ function VoicePlanner({ trip, onTrip }: { trip: Trip; onTrip: (trip: Trip, note:
     recognition.onend = () => {
       setListening(false);
       recognitionRef.current = null;
+      if (chunkSeconds > 0 && chunkSeconds < 45) {
+        setNeedsContinue(true);
+        setSpeechStatus('This voice segment ended. Your transcript is saved — tap the microphone to continue.');
+      }
     };
     try {
       recognition.start();
@@ -207,9 +223,27 @@ function VoicePlanner({ trip, onTrip }: { trip: Trip; onTrip: (trip: Trip, note:
       setSpeechStatus('The browser could not start voice capture. Check microphone permission, then try again.');
     }
   };
+  useEffect(() => {
+    if (!listening || !speechSupported) return;
+    chunkTimerRef.current = setInterval(() => {
+      setChunkSeconds((seconds) => {
+        const next = seconds + 1;
+        if (next === 40) setSpeechStatus('40 seconds captured. JourneyOS will pause in 5 seconds — tap the microphone to continue.');
+        if (next >= 45) {
+          recognitionRef.current?.stop();
+          setNeedsContinue(true);
+          setListening(false);
+          setSpeechStatus('Part captured. Your transcript is saved — tap the microphone to continue with the next part.');
+        }
+        return next;
+      });
+    }, 1000);
+    return () => { if (chunkTimerRef.current) clearInterval(chunkTimerRef.current); };
+  }, [listening, speechSupported]);
   useEffect(() => () => {
     recognitionRef.current?.abort();
     if (mockVoiceTimeoutRef.current) clearTimeout(mockVoiceTimeoutRef.current);
+    if (chunkTimerRef.current) clearInterval(chunkTimerRef.current);
   }, []);
   const createPlan = async () => {
     setLoading(true);
