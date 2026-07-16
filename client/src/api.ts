@@ -9,6 +9,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   getDemo: () => request<{ trip: Trip }>('/api/trips/demo'),
+  hydrateTrip: (trip: Trip) => request<{ trip: Trip }>('/api/trips/hydrate', { method: 'POST', body: JSON.stringify({ trip }) }),
   extractPlan: (conversation: string) => request<{ request: TripRequest; source: string; confidence: number; summary: string; itinerarySource: 'google-places' | 'curated-fallback'; placesDiagnostic?: string; trip: Trip }>('/api/planner/extract', { method: 'POST', body: JSON.stringify({ conversation }) }),
   collectPreferences: (adminName: string, adminPhone: string, phones: Record<string, string>, trip: Trip) => request<{ collection: PreferenceCollection; trip: Trip }>('/api/planner/collect-preferences', { method: 'POST', body: JSON.stringify({ adminName, adminPhone, phones, trip }) }),
   approvePreferences: (interestScores: Trip['groupPreference']['interestScores'], trip: Trip) => request<{ trip: Trip }>('/api/planner/approve-preferences', { method: 'POST', body: JSON.stringify({ interestScores, trip }) }),

@@ -29,6 +29,7 @@ const itinerary: ItineraryItem[] = [
   route('i-fushimi', 4, '08:30', 'Fushimi Inari sunrise', 'Fushimi · Kyoto', 'culture', 120, 24, 78, 71, 'upcoming', true),
   route('i-nishiki', 4, '13:00', 'Nishiki Market tasting', 'Downtown · Kyoto', 'food', 90, 32, 62, 51, 'upcoming'),
   route('i-kiyomizu', 5, '09:30', 'Kiyomizu-dera', 'Higashiyama · Kyoto', 'culture', 105, 25, 51, 31, 'upcoming', true),
+  route('i-farewell', 5, '14:00', 'Kyoto farewell lunch', 'Gion · Kyoto', 'food', 85, 22, 62, 48, 'upcoming'),
 ];
 
 const itineraryFor = (destination: string, duration: number): ItineraryItem[] => {
@@ -91,6 +92,7 @@ const itineraryFor = (destination: string, duration: number): ItineraryItem[] =>
     route('food', 2, '14:30', 'Local food experience', `${destination}`, 'food', 100, 25, 70, 55, 'upcoming'),
     route('daytrip', 3, '09:00', 'Scenic day trip', `${destination}`, 'nature', 150, 20, 62, 80, 'upcoming', true),
     route('culture', 4, '10:00', 'Culture and craft trail', `${destination}`, 'experience', 105, 35, 32, 42, 'upcoming'),
+    route('last-stop', 5, '10:00', 'Final local highlight', `${destination} city center`, 'culture', 80, 30, 48, 45, 'upcoming'),
     route('farewell', 5, '18:00', 'Farewell dinner', `${destination}`, 'food', 100, 25, 60, 70, 'upcoming'),
   ].filter((item) => item.day <= duration);
 };

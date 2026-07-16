@@ -14,6 +14,7 @@ import type { PaymentOrder, TripEvent } from './types.js';
 
 const replanSchema = z.object({ type: z.enum(['late', 'rain', 'flight-delay', 'closed', 'tired']), trip: z.unknown().optional() });
 const requestSchema = z.object({ conversation: z.string().min(3).max(1000) });
+const hydrateTripSchema = z.object({ trip: z.unknown() });
 const preferenceCollectionSchema = z.object({ adminName: z.string().min(2).max(60), adminPhone: z.string().min(7).max(30), phones: z.record(z.string(), z.string().min(7).max(30)), trip: z.unknown().optional() });
 const preferenceDecisionSchema = z.object({ interestScores: z.record(z.string(), z.number().min(1).max(5)), trip: z.unknown().optional() });
 const selectionSchema = z.object({ id: z.string().min(1), trip: z.unknown().optional() });
@@ -37,6 +38,10 @@ export const createApp = () => {
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, mockMode: config.mockMode }));
   app.get('/api/trips/demo', (_req, res) => res.json({ trip: store.getTrip(), mode: config.mockMode ? 'demo' : 'live' }));
+  app.post('/api/trips/hydrate', (req, res, next) => {
+    try { const { trip } = hydrateTripSchema.parse(req.body); store.hydrate(trip as ReturnType<typeof store.getTrip>); res.json({ trip: store.getTrip() }); }
+    catch (error) { next(error); }
+  });
 
   app.post('/api/planner/extract', async (req, res, next) => {
     try {
