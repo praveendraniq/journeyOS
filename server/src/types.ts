@@ -1,7 +1,11 @@
 export type Interest = 'culture' | 'history' | 'food' | 'photography' | 'shopping' | 'nightlife' | 'nature';
 
 export interface TripRequest {
+  origin?: string;
   destination: string;
+  departureDate?: string;
+  returnDate?: string;
+  departureTime?: string;
   duration: number;
   travelers: number;
   budget: number;

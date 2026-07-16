@@ -1,4 +1,4 @@
-import type { GroupPreference, Interest, ItineraryItem, Trip, TripEvent, Traveler } from '../types.js';
+import type { Flight, GroupPreference, Hotel, Interest, ItineraryItem, Trip, TripEvent, Traveler } from '../types.js';
 
 const interests = (scores: Partial<Record<Interest, number>>): Record<Interest, number> => ({
   culture: 2, history: 2, food: 2, photography: 2, shopping: 2, nightlife: 2, nature: 2, ...scores,
@@ -29,6 +29,21 @@ const itinerary: ItineraryItem[] = [
   route('i-nishiki', 4, '13:00', 'Nishiki Market tasting', 'Downtown · Kyoto', 'food', 90, 32, 62, 51, 'upcoming'),
   route('i-kiyomizu', 5, '09:30', 'Kiyomizu-dera', 'Higashiyama · Kyoto', 'culture', 105, 25, 51, 31, 'upcoming', true),
 ];
+
+const planningStops: Record<string, Pick<ItineraryItem, 'title' | 'subtitle'>> = {
+  'i-hotel': { title: 'Check in · selected stay', subtitle: 'Central stay' },
+  'i-sensoji': { title: 'Historic district walk', subtitle: 'Old quarter' },
+  'i-izakaya': { title: 'Local dinner', subtitle: 'Neighborhood table' },
+  'i-meiji': { title: 'Signature landmark', subtitle: 'City highlight' },
+  'i-tsukiji': { title: 'Food market visit', subtitle: 'Market district' },
+  'i-teamlab': { title: 'Immersive local experience', subtitle: 'Creative quarter' },
+  'i-shinkansen': { title: 'Intercity transfer', subtitle: 'Travel day connection' },
+  'i-arashiyama': { title: 'Park and garden walk', subtitle: 'Green neighborhood' },
+  'i-tea': { title: 'Cultural experience', subtitle: 'Local tradition' },
+  'i-fushimi': { title: 'Morning landmark', subtitle: 'Early access route' },
+  'i-nishiki': { title: 'Market tasting', subtitle: 'Downtown market' },
+  'i-kiyomizu': { title: 'Historic viewpoint', subtitle: 'Scenic district' },
+};
 
 const groupPreference: GroupPreference = {
   interestScores: { culture: 4.75, history: 3.5, food: 4.25, photography: 3.5, shopping: 2, nightlife: 2.25, nature: 3.25 },
@@ -80,8 +95,35 @@ export class DemoStore {
   }
 
   updateFromRequest(request: Trip['request']): Trip {
+    const destinationChanged = this.trip.request.destination.toLowerCase() !== request.destination.toLowerCase();
     this.trip.request = { ...this.trip.request, ...request };
     this.trip.name = `${request.destination}, together`;
+    if (destinationChanged) {
+      this.trip.itinerary = itinerary.map((item) => ({
+        ...item,
+        ...(planningStops[item.id] ?? {}),
+        subtitle: `${request.destination} · ${(planningStops[item.id]?.subtitle ?? item.subtitle)}`,
+        status: item.day === 1 ? 'completed' : item.day === 2 ? 'current' : 'upcoming',
+      }));
+    }
+    this.trip.travelDna = { ...this.trip.travelDna, learning: `Trip brief updated for ${request.destination}. Search live inventory with an origin, destination airport, and future dates to replace the saved options.` };
+    this.trip.events = [];
+    return this.getTrip();
+  }
+
+  replaceInventory(flights: Flight[], hotels: Hotel[]): Trip {
+    this.trip.flights = flights.map((flight, index) => ({ ...flight, selected: index === 0 }));
+    this.trip.hotels = hotels.map((hotel, index) => ({ ...hotel, selected: index === 0 }));
+    const selectedFlight = this.trip.flights[0];
+    const selectedHotel = this.trip.hotels[0];
+    if (selectedFlight || selectedHotel) this.recalculateBudget((selectedFlight?.price ?? 0) * this.trip.request.travelers, selectedHotel?.totalPrice ?? 0);
+    return this.getTrip();
+  }
+
+  replaceHotels(hotels: Hotel[]): Trip {
+    this.trip.hotels = hotels.map((hotel, index) => ({ ...hotel, selected: index === 0 }));
+    const selectedHotel = this.trip.hotels[0];
+    if (selectedHotel) this.recalculateBudget(this.trip.budget.flight, selectedHotel.totalPrice);
     return this.getTrip();
   }
 

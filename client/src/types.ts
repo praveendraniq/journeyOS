@@ -2,7 +2,7 @@ export type Interest = 'culture' | 'history' | 'food' | 'photography' | 'shoppin
 export type ItemCategory = 'stay' | 'culture' | 'food' | 'transport' | 'nature' | 'museum' | 'experience';
 export type ReplanType = 'late' | 'rain' | 'flight-delay' | 'closed' | 'tired';
 
-export interface TripRequest { destination: string; duration: number; travelers: number; budget: number; travelStyle: string; foodPreferences: string[]; interests: Interest[]; }
+export interface TripRequest { origin?: string; destination: string; departureDate?: string; returnDate?: string; departureTime?: string; duration: number; travelers: number; budget: number; travelStyle: string; foodPreferences: string[]; interests: Interest[]; }
 export interface Traveler { id: string; name: string; initials: string; budgetPreference: string; activityLevel: number; pacePreference: string; foodPreference: string; interests: Record<Interest, number>; }
 export interface GroupPreference { interestScores: Record<Interest, number>; recommendedPace: string; explanation: string; }
 export interface Flight { id: string; airline: string; code: string; departure: string; arrival: string; departureTime: string; arrivalTime: string; price: number; duration: string; stops: number; selected?: boolean; }

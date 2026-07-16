@@ -15,6 +15,30 @@ const replanSchema = z.object({ type: z.enum(['late', 'rain', 'flight-delay', 'c
 const requestSchema = z.object({ conversation: z.string().min(3).max(1000) });
 const agentQuerySchema = z.object({ query: z.string().trim().min(3).max(1000) });
 const selectionSchema = z.object({ id: z.string().min(1) });
+const inventorySearchSchema = z.object({
+  origin: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/),
+  destination: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/),
+  departureDate: z.string().date(),
+  returnDate: z.string().date().optional(),
+  checkInDate: z.string().date(),
+  checkOutDate: z.string().date(),
+}).superRefine((input, context) => {
+  if (input.checkInDate < input.departureDate) context.addIssue({ code: z.ZodIssueCode.custom, path: ['checkInDate'], message: 'Check-in must be on or after the departure date.' });
+  if (input.returnDate && input.returnDate < input.departureDate) context.addIssue({ code: z.ZodIssueCode.custom, path: ['returnDate'], message: 'Return date must be on or after the departure date.' });
+  if (input.returnDate && input.checkOutDate > input.returnDate) context.addIssue({ code: z.ZodIssueCode.custom, path: ['checkOutDate'], message: 'Check-out must be on or before the return date.' });
+  if (input.checkOutDate < input.checkInDate) context.addIssue({ code: z.ZodIssueCode.custom, path: ['checkOutDate'], message: 'Check-out must be after check-in.' });
+});
+const travelDatesSchema = z.object({
+  departureDate: z.string().date(),
+  returnDate: z.string().date().optional(),
+  checkInDate: z.string().date(),
+  checkOutDate: z.string().date(),
+}).superRefine((input, context) => {
+  if (input.checkInDate < input.departureDate) context.addIssue({ code: z.ZodIssueCode.custom, path: ['checkInDate'], message: 'Check-in must be on or after departure.' });
+  if (input.returnDate && input.returnDate < input.departureDate) context.addIssue({ code: z.ZodIssueCode.custom, path: ['returnDate'], message: 'Return must be on or after departure.' });
+  if (input.returnDate && input.checkOutDate > input.returnDate) context.addIssue({ code: z.ZodIssueCode.custom, path: ['checkOutDate'], message: 'Check-out must be on or before return.' });
+  if (input.checkOutDate < input.checkInDate) context.addIssue({ code: z.ZodIssueCode.custom, path: ['checkOutDate'], message: 'Check-out must be after check-in.' });
+});
 const receiptSchema = z.object({ amount: z.number().positive().optional(), restaurant: z.string().min(1).optional(), fileName: z.string().optional() });
 const voiceTokenSchema = z.object({ participant_name: z.string().trim().min(1).max(80).optional(), session_id: z.string().trim().min(1).max(120).optional() });
 
@@ -144,15 +168,9 @@ export const createApp = () => {
       await Promise.all([
         run.delegate(
           'travel-inventory',
-          'Refresh normalized flight and hotel candidates for the trip brief',
-          async () => {
-            const [flights, hotels] = await Promise.all([
-              sabre.searchFlights({ origin: 'SFO', destination: 'TYO', departureDate: '2026-10-12' }),
-              sabre.searchHotels({ cityCode: 'TYO', checkInDate: '2026-10-12', checkOutDate: '2026-10-15' }),
-            ]);
-            return { flights, hotels };
-          },
-          ({ flights, hotels }) => `Found ${flights.length} flights and ${hotels.length} hotels`,
+          'Hold inventory search until the traveler supplies an exact route and future travel dates',
+          () => ({ flights: trip.flights.length, hotels: trip.hotels.length }),
+          ({ flights, hotels }) => `${flights} saved flights and ${hotels} saved hotels retained pending search details`,
         ),
         run.delegate(
           'itinerary-route',
@@ -192,11 +210,84 @@ export const createApp = () => {
     }
     catch (error) { next(error); }
   });
+  app.post('/api/inventory/search', async (req, res, next) => {
+    const run = agents.start('Search live Sabre inventory');
+    try {
+      const input = inventorySearchSchema.parse(req.body);
+      let results = await run.delegate(
+        'travel-inventory',
+        'Search and normalize live Sabre flight and hotel offers',
+        async () => {
+          const [flights, hotels] = await Promise.all([
+            sabre.searchFlights(input),
+            sabre.searchHotels({ cityCode: input.destination, checkInDate: input.checkInDate, checkOutDate: input.checkOutDate }),
+          ]);
+          return { flights, hotels };
+        },
+        (results) => `Found ${results.flights.length} flights and ${results.hotels.length} hotels`,
+      );
+      let usedInput = input;
+      let message = results.flights.length > 0 ? 'Live Sabre flights and hotels are ready to review.' : 'No flights were available on the requested date.';
+      if (results.flights.length === 0) {
+        for (let offset = 1; offset <= 7; offset += 1) {
+          const shiftDate = (date: string) => {
+            const next = new Date(`${date}T12:00:00Z`);
+            next.setUTCDate(next.getUTCDate() + offset);
+            return next.toISOString().slice(0, 10);
+          };
+          const candidate = { ...input, departureDate: shiftDate(input.departureDate), checkInDate: shiftDate(input.checkInDate), checkOutDate: shiftDate(input.checkOutDate) };
+          const flights = await run.delegate(
+            'travel-inventory',
+            `Search the next available departure date (+${offset} day${offset === 1 ? '' : 's'})`,
+            () => sabre.searchFlights(candidate),
+            (offers) => `${offers.length} flight offers on ${candidate.departureDate}`,
+          );
+          if (flights.length === 0) continue;
+          const hotels = await run.delegate(
+            'travel-inventory',
+            'Refresh hotel inventory for the next available travel dates',
+            () => sabre.searchHotels({ cityCode: candidate.destination, checkInDate: candidate.checkInDate, checkOutDate: candidate.checkOutDate }),
+            (offers) => `${offers.length} hotel offers on the updated dates`,
+          );
+          results = { flights, hotels };
+          usedInput = candidate;
+          message = `No flights were available on ${input.departureDate}. Showing the next available options for ${candidate.departureDate}.`;
+          break;
+        }
+        if (results.flights.length === 0) message = `No flights were available from ${input.departureDate} through the following 7 days. Try another route or later dates.`;
+      }
+      const cityNames: Record<string, string> = { PAR: 'Paris', CDG: 'Paris', ORY: 'Paris', LAX: 'Los Angeles', NYC: 'New York', JFK: 'New York', LHR: 'London', SFO: 'San Francisco', TYO: 'Tokyo', HND: 'Tokyo', NRT: 'Tokyo' };
+      const currentRequest = store.getTrip().request;
+      store.updateFromRequest({ ...currentRequest, destination: cityNames[input.destination] ?? input.destination, departureDate: usedInput.departureDate, returnDate: usedInput.returnDate });
+      const trip = store.replaceInventory(results.flights, results.hotels);
+      res.json({ trip, message, source: config.mockMode ? 'mock' : 'sabre-mcp', agentRun: run.complete() });
+    } catch (error) { next(error); }
+  });
+  app.post('/api/trip/dates', (req, res, next) => {
+    try {
+      const dates = travelDatesSchema.parse(req.body);
+      const trip = store.updateFromRequest({ ...store.getTrip().request, ...dates });
+      res.json({ trip });
+    } catch (error) { next(error); }
+  });
   app.post('/api/bookings/flight', async (req, res, next) => {
     const run = agents.start('Select a flight and update the shared trip cost');
     try {
       const id = selectionSchema.parse(req.body).id;
-      const trip = await run.delegate('travel-inventory', 'Apply the selected normalized flight offer', () => store.selectFlight(id), (updatedTrip) => updatedTrip.flights.find((flight) => flight.selected)?.code ?? 'Flight selected');
+      let trip = await run.delegate('travel-inventory', 'Apply the selected normalized flight offer', () => store.selectFlight(id), (updatedTrip) => updatedTrip.flights.find((flight) => flight.selected)?.code ?? 'Flight selected');
+      const selectedFlight = trip.flights.find((flight) => flight.selected);
+      if (selectedFlight) {
+        const checkInDate = trip.request.departureDate ?? '2026-10-12';
+        const derivedCheckout = new Date(`${checkInDate}T12:00:00Z`);
+        derivedCheckout.setUTCDate(derivedCheckout.getUTCDate() + Math.max(1, trip.request.duration - 1));
+        const checkOutDate = trip.request.returnDate && trip.request.returnDate < derivedCheckout.toISOString().slice(0, 10) ? trip.request.returnDate : derivedCheckout.toISOString().slice(0, 10);
+        try {
+          const hotels = await run.delegate('travel-inventory', 'Refresh hotels for the selected flight arrival airport', () => sabre.searchHotels({ cityCode: selectedFlight.arrival, checkInDate, checkOutDate }), (offers) => `${offers.length} hotels near ${selectedFlight.arrival}`);
+          if (hotels.length > 0) trip = store.replaceHotels(hotels);
+        } catch {
+          // Keep the currently displayed hotels when a downstream provider is temporarily unavailable.
+        }
+      }
       await run.delegate('commerce', 'Recalculate the group total after the flight selection', () => trip.budget, (budget) => `$${budget.spent.toLocaleString()} planned; $${budget.remaining.toLocaleString()} remaining`);
       res.json({ trip, agentRun: run.complete() });
     }
