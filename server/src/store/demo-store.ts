@@ -74,6 +74,16 @@ const itineraryFor = (destination: string, duration: number): ItineraryItem[] =>
     route('thai-jimthompson', 3, '10:00', 'Jim Thompson House', 'Jim Thompson House Museum, Bangkok, Thailand', 'museum', 42, 48, 85, 35, 'upcoming'),
     route('thai-lumpini', 3, '16:00', 'Lumphini Park & local dinner', 'Lumphini Park, Bangkok, Thailand', 'nature', 63, 60, 76, 28, 'upcoming', true),
   ].filter((item) => item.day <= duration);
+  if (place.includes('bali')) return [
+    route('bali-uluwatu', 1, '09:00', 'Uluwatu Temple', 'Uluwatu Temple, Bali, Indonesia', 'culture', 28, 46, 95, 42, 'current', true),
+    route('bali-lunch', 1, '12:30', 'Clifftop Balinese lunch', 'Single Fin, Uluwatu, Bali, Indonesia', 'food', 52, 58, 75, 16, 'upcoming'),
+    route('bali-cean', 1, '16:00', 'Kecak fire dance', 'Uluwatu Temple, Bali, Indonesia', 'experience', 72, 73, 80, 14, 'upcoming', true),
+    route('bali-ubud', 2, '09:00', 'Tegalalang Rice Terrace', 'Tegalalang Rice Terrace, Bali, Indonesia', 'nature', 34, 48, 95, 40, 'upcoming', true),
+    route('bali-monkey', 2, '13:00', 'Sacred Monkey Forest', 'Sacred Monkey Forest Sanctuary, Ubud, Bali, Indonesia', 'nature', 58, 61, 80, 22, 'upcoming', true),
+    route('bali-palace', 2, '17:00', 'Ubud Palace walk', 'Ubud Palace, Bali, Indonesia', 'culture', 75, 78, 65, 12, 'upcoming'),
+    route('bali-tirta', 3, '09:00', 'Tirta Empul water temple', 'Tirta Empul Temple, Bali, Indonesia', 'culture', 40, 50, 85, 30, 'upcoming'),
+    route('bali-seminyak', 3, '16:00', 'Seminyak sunset dinner', 'Seminyak Beach, Bali, Indonesia', 'food', 68, 65, 80, 35, 'upcoming'),
+  ].filter((item) => item.day <= duration);
   return [
     route('arrival', 1, '14:00', `Arrive in ${destination}`, `${destination}`, 'transport', 20, 45, 75, 50, 'current'),
     route('welcome', 1, '18:00', 'Neighborhood welcome dinner', `${destination}`, 'food', 55, 58, 75, 90, 'upcoming'),
