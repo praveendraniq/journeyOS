@@ -17,6 +17,7 @@ const requestSchema = z.object({ conversation: z.string().min(3).max(1000) });
 const preferenceCollectionSchema = z.object({ adminName: z.string().min(2).max(60), adminPhone: z.string().min(7).max(30), phones: z.record(z.string(), z.string().min(7).max(30)) });
 const selectionSchema = z.object({ id: z.string().min(1) });
 const receiptSchema = z.object({ amount: z.number().positive().optional(), restaurant: z.string().min(1).optional(), fileName: z.string().optional() });
+const orderSchema = z.object({ percentages: z.record(z.string(), z.number().min(0).max(100)).optional() }).superRefine((value, ctx) => { if (value.percentages && Math.abs(Object.values(value.percentages).reduce((sum, item) => sum + item, 0) - 100) > 0.01) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Custom split must total 100%' }); });
 
 export const createApp = () => {
   const store = new DemoStore();
@@ -86,10 +87,11 @@ export const createApp = () => {
     } catch (error) { next(error); }
   });
 
-  app.post('/api/payments/create-order', async (_req, res, next) => {
+  app.post('/api/payments/create-order', async (req, res, next) => {
     try {
       const trip = store.getTrip();
-      const order = await payments.createOrder(trip.budget.spent, trip.travelers);
+      const { percentages } = orderSchema.parse(req.body ?? {});
+      const order = await payments.createOrder(trip.budget.spent, trip.travelers, percentages);
       orders.set(order.id, order);
       res.json({ order });
     } catch (error) { next(error); }
