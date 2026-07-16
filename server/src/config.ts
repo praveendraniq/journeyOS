@@ -7,8 +7,13 @@ export const config = {
   clientOrigin: process.env.CLIENT_ORIGIN ?? 'http://localhost:5173',
   mockMode: bool(process.env.MOCK_MODE, true),
   sabre: {
+    authVersion: process.env.SABRE_AUTH_VERSION ?? 'v3',
     clientId: process.env.SABRE_CLIENT_ID,
     clientSecret: process.env.SABRE_CLIENT_SECRET,
+    v2UserId: process.env.SABRE_V2_USER_ID,
+    v2Password: process.env.SABRE_V2_PASSWORD,
+    v2Pcc: process.env.SABRE_V2_PCC ?? 'S5OM',
+    v2Domain: process.env.SABRE_V2_DOMAIN ?? 'EXT',
     baseUrl: process.env.SABRE_BASE_URL ?? 'https://api.cert.platform.sabre.com',
   },
   paypal: {
@@ -23,5 +28,8 @@ export const config = {
   landingAi: {
     apiKey: process.env.LANDING_AI_API_KEY,
     endpoint: process.env.LANDING_AI_ENDPOINT,
+  },
+  googlePlaces: {
+    apiKey: process.env.GOOGLE_PLACES_API_KEY,
   },
 };

@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { config } from './config.js';
 import { DemoStore } from './store/demo-store.js';
 import { LandingAiService } from './services/landing-ai.service.js';
+import { GooglePlacesService } from './services/google-places.service.js';
+import type { PlaceAttraction } from './services/google-places.service.js';
 import { PayPalService } from './services/payment.service.js';
 import { RouteOptimizer } from './services/route-optimizer.service.js';
 import { SabreService } from './services/sabre.service.js';
@@ -23,6 +25,7 @@ export const createApp = () => {
   const payments = new PayPalService();
   const routeOptimizer = new RouteOptimizer();
   const receipts = new LandingAiService();
+  const places = new GooglePlacesService();
   const orders = new Map<string, PaymentOrder>();
   const app = express();
 
@@ -36,8 +39,11 @@ export const createApp = () => {
     try {
       const { conversation } = requestSchema.parse(req.body);
       const result = await planner.extractTrip(conversation);
-      const trip = store.updateFromRequest(result.request);
-      res.json({ ...result, trip, summary: `${result.request.duration} days in ${result.request.destination} for ${result.request.travelers} travelers, with a $${result.request.budget.toLocaleString()} budget.` });
+      let attractions: PlaceAttraction[] = [];
+      try { attractions = await places.searchAttractions(result.request.destination, result.request.duration * 3); }
+      catch (error) { console.warn('Google Places unavailable; using curated itinerary.', error instanceof Error ? error.message : error); }
+      const trip = store.updateFromRequest(result.request, attractions);
+      res.json({ ...result, trip, itinerarySource: attractions.length >= 2 ? 'google-places' : 'curated-fallback', summary: `${result.request.duration} days in ${result.request.destination} for ${result.request.travelers} travelers, with a $${result.request.budget.toLocaleString()} budget.` });
     } catch (error) { next(error); }
   });
   app.post('/api/planner/collect-preferences', async (req, res, next) => {

@@ -1,4 +1,5 @@
 import type { GroupPreference, Interest, ItineraryItem, PreferenceCollection, Trip, TripEvent, Traveler } from '../types.js';
+import type { PlaceAttraction } from '../services/google-places.service.js';
 
 const interests = (scores: Partial<Record<Interest, number>>): Record<Interest, number> => ({
   culture: 2, history: 2, food: 2, photography: 2, shopping: 2, nightlife: 2, nature: 2, ...scores,
@@ -74,6 +75,27 @@ const itineraryFor = (destination: string, duration: number): ItineraryItem[] =>
   ].filter((item) => item.day <= duration);
 };
 
+const itineraryFromPlaces = (duration: number, places: PlaceAttraction[]): ItineraryItem[] => {
+  const slots = ['09:00', '12:30', '16:00'];
+  return places.slice(0, duration * slots.length).map((place, index) => {
+    const category: ItineraryItem['category'] = index % 3 === 1 ? 'food' : index % 3 === 2 ? 'experience' : 'culture';
+    return route(
+      `place-${place.id}`,
+      Math.floor(index / slots.length) + 1,
+      slots[index % slots.length],
+      place.name,
+      place.address,
+      category,
+      28 + ((index * 17) % 48),
+      30 + ((index * 11) % 45),
+      category === 'food' ? 75 : 95,
+      20 + ((index * 13) % 35),
+      index === 0 ? 'current' : 'upcoming',
+      category !== 'food',
+    );
+  });
+};
+
 const groupPreference: GroupPreference = {
   interestScores: { culture: 4.75, history: 3.5, food: 4.25, photography: 3.5, shopping: 2, nightlife: 2.25, nature: 3.25 },
   recommendedPace: 'Balanced discovery',
@@ -134,12 +156,12 @@ export class DemoStore {
     return this.getTrip();
   }
 
-  updateFromRequest(request: Trip['request']): Trip {
+  updateFromRequest(request: Trip['request'], places: PlaceAttraction[] = []): Trip {
     this.trip.request = { ...this.trip.request, ...request };
     this.trip.name = `${request.destination}, together`;
-    this.trip.itinerary = itineraryFor(request.destination, request.duration);
+    this.trip.itinerary = places.length >= 2 ? itineraryFromPlaces(request.duration, places) : itineraryFor(request.destination, request.duration);
     this.setBookingOptions(request.destination);
-    this.trip.events = [{ id: `brief-${Date.now()}`, type: 'tired', title: `${request.destination} trip brief created`, createdAt: new Date().toISOString(), explanation: `Your ${request.duration}-day ${request.destination} itinerary is ready to review. Every page now reflects this proposed trip.` }];
+    this.trip.events = [{ id: `brief-${Date.now()}`, type: 'tired', title: `${request.destination} trip brief created`, createdAt: new Date().toISOString(), explanation: `${places.length >= 2 ? 'Google Places sourced real attractions for' : 'A curated route is ready for'} your ${request.duration}-day ${request.destination} itinerary. Every page now reflects this proposed trip.` }];
     this.trip.groupPreference = { ...this.trip.groupPreference, explanation: `The ${request.destination} route prioritizes ${request.interests.slice(0, 3).join(', ')} while keeping the group’s preferred pace.` };
     this.trip.preferenceCollection = undefined;
     return this.getTrip();

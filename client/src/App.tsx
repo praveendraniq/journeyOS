@@ -88,7 +88,9 @@ function LiveGoogleMap({ trip, activeDay }: { trip: Trip; activeDay: number }) {
   const destination = locations[locations.length - 1] ?? trip.request.destination;
   const waypoints = locations.slice(1, -1).join('|');
   const waypointQuery = waypoints ? `&waypoints=${encodeURIComponent(waypoints)}` : '';
-  const src = `https://www.google.com/maps/embed/v1/directions?key=${encodeURIComponent(key)}&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}${waypointQuery}&mode=driving`;
+  const src = locations.length < 2
+    ? `https://www.google.com/maps/embed/v1/place?key=${encodeURIComponent(key)}&q=${encodeURIComponent(origin)}`
+    : `https://www.google.com/maps/embed/v1/directions?key=${encodeURIComponent(key)}&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}${waypointQuery}&mode=driving`;
   const mapsUrl = `https://www.google.com/maps/dir/${locations.map(encodeURIComponent).join('/')}`;
   return <section className="overflow-hidden rounded-[28px] border border-stone-200 bg-white"><div className="flex items-center justify-between gap-3 px-5 py-4"><div><p className="eyebrow">Interactive day route</p><h3 className="mt-1 text-lg font-bold text-ink">Day {activeDay} · {trip.request.destination}</h3></div><a href={mapsUrl} target="_blank" rel="noreferrer" className="text-xs font-bold text-moss hover:text-ink">Open full map ↗</a></div><iframe title={`Google Maps itinerary for day ${activeDay} in ${trip.request.destination}`} src={src} className="h-80 w-full border-0" loading="lazy" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen /></section>;
 }
@@ -128,7 +130,7 @@ function TripOverview({ trip, setPage, activeDay, setActiveDay, onReceipt }: { t
 }
 
 function VoicePlanner({ trip, onTrip }: { trip: Trip; onTrip: (trip: Trip, note: string) => void }) {
-  const sampleVoiceCommand = 'Plan a 5-day Japan trip for four people under $6,000. We love temples, food, history, and photography.';
+  const sampleVoiceCommand = `Plan a ${trip.request.duration}-day ${trip.request.destination} trip for ${trip.request.travelers} people under $${trip.request.budget.toLocaleString()}. We enjoy ${trip.request.interests.join(', ')}.`;
   const [conversation, setConversation] = useState(() => `Plan a ${trip.request.duration}-day ${trip.request.destination} trip for ${trip.request.travelers} people under $${trip.request.budget.toLocaleString()}. We love ${trip.request.interests.join(', ')}.`);
   const [listening, setListening] = useState(false);
   const [speechStatus, setSpeechStatus] = useState('Tap the microphone and allow access when your browser asks.');
@@ -215,7 +217,7 @@ function VoicePlanner({ trip, onTrip }: { trip: Trip; onTrip: (trip: Trip, note:
       const response = await api.extractPlan(conversation);
       setResult(response);
       setConversation(`Plan a ${response.request.duration}-day ${response.request.destination} trip for ${response.request.travelers} people under $${response.request.budget.toLocaleString()}. We love ${response.request.interests.join(', ')}.`);
-      onTrip(response.trip, 'Voice brief structured into a living trip plan.');
+      onTrip(response.trip, response.itinerarySource === 'google-places' ? 'Real attractions sourced from Google Places and mapped into your trip.' : 'Curated fallback route created — add GOOGLE_PLACES_API_KEY to the server to source live attractions.');
     } catch (error) { onTrip(trip, error instanceof Error ? error.message : 'Could not extract that trip request.'); }
     finally { setLoading(false); }
   };
@@ -224,7 +226,7 @@ function VoicePlanner({ trip, onTrip }: { trip: Trip; onTrip: (trip: Trip, note:
     try {
       const response = await api.collectPreferences(adminName, adminPhone, phones);
       onTrip(response.trip, `${response.collection.calls.length} preference calls completed. The admin-led plan is ready for review.`);
-      setReviewTab('plan');
+      setReviewTab('people');
     } catch (error) { onTrip(trip, error instanceof Error ? error.message : 'Could not collect group preferences.'); }
     finally { setCollecting(false); }
   };
