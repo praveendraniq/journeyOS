@@ -32,7 +32,7 @@ const itinerary: ItineraryItem[] = [
 
 const itineraryFor = (destination: string, duration: number): ItineraryItem[] => {
   const place = destination.toLowerCase();
-  if (place.includes('yellowstone')) return [
+  if (place.includes('yellowstone') || place.includes('yellow stone')) return [
     route('yellowstone-arrival', 1, '10:00', 'Arrive at Yellowstone', 'West Entrance · Yellowstone National Park', 'transport', 20, 45, 75, 50, 'current'),
     route('yellowstone-grand-prismatic', 1, '13:00', 'Grand Prismatic Spring', 'Midway Geyser Basin · Yellowstone', 'nature', 85, 30, 55, 58, 'upcoming', true),
     route('yellowstone-old-faithful', 1, '17:00', 'Old Faithful & Upper Geyser Basin', 'Old Faithful · Yellowstone', 'nature', 100, 24, 65, 35, 'upcoming', true),
@@ -209,7 +209,7 @@ export class DemoStore {
   }
 
   private setBookingOptions(destination: string) {
-    const isYellowstone = destination.toLowerCase().includes('yellowstone');
+    const isYellowstone = destination.toLowerCase().includes('yellowstone') || destination.toLowerCase().includes('yellow stone');
     const arrival = isYellowstone ? 'BZN' : destination.slice(0, 3).toUpperCase();
     const hotelName = isYellowstone ? 'Canyon Lodge & Cabins' : `${destination} Explorer Lodge`;
     const location = isYellowstone ? 'Canyon Village · Yellowstone' : `Central ${destination}`;
