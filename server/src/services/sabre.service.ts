@@ -2,6 +2,9 @@ import { config } from '../config.js';
 import type { Flight, Hotel } from '../types.js';
 
 export class SabreService {
+  private cachedToken?: { value: string; expiresAt: number };
+  private tokenRequest?: Promise<string>;
+
   constructor(private readonly fixtures: { flights: Flight[]; hotels: Hotel[] }) {}
 
   async searchFlights(params: { origin?: string; destination?: string; departureDate?: string }): Promise<Flight[]> {
@@ -27,13 +30,30 @@ export class SabreService {
   }
 
   private async token(): Promise<string> {
-    const response = await fetch(`${config.sabre.baseUrl}/v2/auth/token`, {
+    // Sabre OAuth returns a short-lived bearer token. Reuse it until
+    // one minute before expiry, then regenerate it server-side.
+    if (this.cachedToken && this.cachedToken.expiresAt > Date.now()) return this.cachedToken.value;
+    if (this.tokenRequest) return this.tokenRequest;
+
+    this.tokenRequest = this.createToken().finally(() => {
+      this.tokenRequest = undefined;
+    });
+    return this.tokenRequest;
+  }
+
+  private async createToken(): Promise<string> {
+    const response = await fetch(`${config.sabre.baseUrl}/${config.sabre.oauthVersion}/auth/token`, {
       method: 'POST',
       headers: { Authorization: `Basic ${Buffer.from(`${config.sabre.clientId}:${config.sabre.clientSecret}`).toString('base64')}`, 'Content-Type': 'application/x-www-form-urlencoded' },
       body: 'grant_type=client_credentials',
     });
     if (!response.ok) throw new Error(`Sabre authorization returned ${response.status}`);
-    return (await response.json() as { access_token: string }).access_token;
+    const body = await response.json() as { access_token?: string; expires_in?: number | string };
+    if (!body.access_token) throw new Error('Sabre authorization response did not include an access token');
+    const expiresInSeconds = Number(body.expires_in ?? 300);
+    const refreshAfterSeconds = Math.max(5, expiresInSeconds - 60);
+    this.cachedToken = { value: body.access_token, expiresAt: Date.now() + refreshAfterSeconds * 1_000 };
+    return body.access_token;
   }
 
   private normalizeFlight(offer: Record<string, unknown>, index: number): Flight {
