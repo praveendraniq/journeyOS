@@ -3,6 +3,17 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Group calls and negotiation now live in the dedicated, editable planning
+   workflow directly below the voice brief. Hide the legacy embedded panels. */
+.planner-workflow > section:nth-child(n + 4) {
+  display: none;
+}
+
+/* Variable expenses and settlement now have their own top-level workspace. */
+section[class*="rounded-[24px]"][class*="border-stone-200"][class*="p-5"] {
+  display: none;
+}
+
 @layer base {
   * { @apply border-stone-200; }
   body { @apply m-0 bg-cream font-sans antialiased; font-family: 'Manrope', sans-serif; }

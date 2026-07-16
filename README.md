@@ -5,11 +5,15 @@ JourneyOS is a mock-first hackathon MVP for planning, booking, managing, and dyn
 ## What is included
 
 - Voice-style trip planner with structured preference extraction
-- Four-person traveler profile and combined group preference model
+- Editable traveler profiles with phone, pace, constraints and 1–5 interests
+- Vocal Bridge-shaped group calls, mediated compromise, deterministic individual plan fit and fairness-adjusted group happiness
 - Sabre-shaped flight and hotel search endpoints with sandbox-ready adapters
-- PayPal-shaped order and split-payment flow with a demo fallback
+- Two-stage money flow: split known flight/hotel costs before travel, then net receipt-based shared expenses after travel
+- Destination-derived current weather via Google Weather when configured, Open-Meteo as the live fallback, and an explicitly labeled demo fallback
 - Route optimization using opening hours, geography, travel time, and weather constraints
-- Animated Japan journey map, itinerary timeline, Operations Center, and Travel DNA learning
+- Unified Live trip page with map, progress, disruptions and route intelligence
+- Evidence-backed Travel DNA history with before/after values, confidence and reasons
+- Editable departure/return dates with destination-arrival and hotel-night calculation
 - Optional Landing AI receipt analysis endpoint with a demo OCR fallback
 
 ## Run locally
@@ -32,10 +36,11 @@ pnpm lint
 ## Demo sequence
 
 1. Open the Voice Planner and submit: “Plan a 5-day Japan trip for four people under $6,000.”
-2. Review the group preference rationale and choose a flight and hotel.
-3. Open Checkout and create a split order.
-4. In Operations Center, trigger **Running late +90m** and then **Heavy rain**.
-5. Watch the route, itinerary, budget, and Travel DNA update.
+2. In **Group planning**, edit traveler profiles, confirm call consent, and run the simulated Vocal Bridge negotiation.
+3. Review plan-fit percentages and compromises in Decision Studio, adjust priorities, and click **Approve & update trip**.
+4. In **Booking & payment**, edit dates, verify calendar days versus hotel nights, choose inventory, and split only the known flight/hotel booking total. Variable receipts are settled after the trip.
+5. In **Live trip**, complete an activity late and trigger **Heavy rain**.
+6. Open **Travel DNA** to inspect the evidence-backed learning history.
 
 ## Stretch goals
 
@@ -51,7 +56,8 @@ Open the app in Chrome or Edge, select **Voice planner**, click the microphone, 
 `MOCK_MODE=true` is the default: no account, key, or internet access is needed for the polished demo. Set it to `false` and configure credentials to activate the service adapters.
 
 - `SabreService` requests Sabre OAuth and normalizes flight and hotel results.
-- `PayPalService` uses PayPal Orders APIs when credentials are present; otherwise it creates a mock order that can be captured by the demo UI.
+- `PayPalService` uses PayPal Orders APIs when credentials are present; otherwise it creates a mock order. The order covers known flight and hotel costs, never later receipt spend.
+- `WeatherService` geocodes the active-day city, prefers Google Weather when a server key is configured, and falls back to Open-Meteo. Network failures return a clearly labeled demo value instead of pretending it is live.
 - `VocalBridgeService` forwards an audio/transcript payload to a configured Vocal Bridge endpoint; the UI safely uses text-to-plan in mock mode.
 - `LandingAiService` accepts receipt metadata and returns normalized receipt data in mock mode.
 

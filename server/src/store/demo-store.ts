@@ -1,15 +1,16 @@
-import type { GroupPreference, Interest, ItineraryItem, PreferenceCollection, Trip, TripEvent, Traveler } from '../types.js';
+import type { GroupPreference, Interest, ItineraryItem, PreferenceCollection, TravelDnaChange, Trip, TripEvent, Traveler } from '../types.js';
 import type { PlaceAttraction } from '../services/google-places.service.js';
+import { groupHappiness } from '../services/happiness.service.js';
 
 const interests = (scores: Partial<Record<Interest, number>>): Record<Interest, number> => ({
   culture: 2, history: 2, food: 2, photography: 2, shopping: 2, nightlife: 2, nature: 2, ...scores,
 });
 
 const travelers: Traveler[] = [
-  { id: 't-aya', name: 'Aya', initials: 'AY', budgetPreference: 'balanced', activityLevel: 4, pacePreference: 'full', foodPreference: 'Sushi & regional food', interests: interests({ culture: 5, history: 5, food: 4, photography: 3 }) },
-  { id: 't-marcus', name: 'Marcus', initials: 'MR', budgetPreference: 'premium', activityLevel: 3, pacePreference: 'balanced', foodPreference: 'Street food', interests: interests({ food: 5, photography: 4, nightlife: 3, shopping: 3 }) },
-  { id: 't-leila', name: 'Leila', initials: 'LE', budgetPreference: 'balanced', activityLevel: 4, pacePreference: 'balanced', foodPreference: 'Vegetarian friendly', interests: interests({ culture: 5, history: 4, photography: 5, nature: 4 }) },
-  { id: 't-jon', name: 'Jon', initials: 'JO', budgetPreference: 'value', activityLevel: 3, pacePreference: 'easy', foodPreference: 'No shellfish', interests: interests({ culture: 4, food: 4, nature: 4, shopping: 1 }) },
+  { id: 't-aya', name: 'Aya', initials: 'AY', phone: '+1 (415) 555-0101', budgetPreference: 'balanced', activityLevel: 4, pacePreference: 'full', foodPreference: 'Sushi & regional food', interests: interests({ culture: 5, history: 5, food: 4, photography: 3 }) },
+  { id: 't-marcus', name: 'Marcus', initials: 'MR', phone: '+1 (415) 555-0148', budgetPreference: 'premium', activityLevel: 3, pacePreference: 'balanced', foodPreference: 'Street food', interests: interests({ food: 5, photography: 4, nightlife: 3, shopping: 3 }) },
+  { id: 't-leila', name: 'Leila', initials: 'LE', phone: '+1 (415) 555-0172', budgetPreference: 'balanced', activityLevel: 4, pacePreference: 'balanced', foodPreference: 'Vegetarian friendly', interests: interests({ culture: 5, history: 4, photography: 5, nature: 4 }) },
+  { id: 't-jon', name: 'Jon', initials: 'JO', phone: '+1 (415) 555-0196', budgetPreference: 'value', activityLevel: 3, pacePreference: 'easy', foodPreference: 'No shellfish', interests: interests({ culture: 4, food: 4, nature: 4, shopping: 1 }) },
 ];
 
 const route = (id: string, day: number, time: string, title: string, subtitle: string, category: ItineraryItem['category'], x: number, y: number, durationMins: number, travelMins: number, status: ItineraryItem['status'], weatherSensitive = false): ItineraryItem => ({
@@ -129,8 +130,9 @@ export class DemoStore {
 
   constructor() {
     this.trip = {
+      schemaVersion: 2,
       id: 'trip-japan-2026', name: 'Japan, together', dates: '12–16 Oct 2026',
-      request: { destination: 'Japan', duration: 5, travelers: 4, budget: 6000, travelStyle: 'culture-forward, unhurried', foodPreferences: ['sushi', 'vegetarian friendly', 'street food'], interests: ['culture', 'history', 'food', 'photography'] },
+      request: { origin: 'San Francisco', destination: 'Japan', departureDate: '2026-10-12', returnDate: '2026-10-16', duration: 5, travelers: 4, budget: 6000, travelStyle: 'culture-forward, unhurried', foodPreferences: ['sushi', 'vegetarian friendly', 'street food'], interests: ['culture', 'history', 'food', 'photography'] },
       travelers,
       groupPreference,
       flights: [
@@ -148,30 +150,174 @@ export class DemoStore {
       travelDna: { culture: 5, history: 5, photography: 4, shopping: 1, nightlife: 2, food: 5, learning: 'The group lingers at temples and food stops; preserve open time around cultural neighborhoods.' },
       events: [],
       progress: 28,
+      progressState: { completionPercent: 23, scheduleVarianceMins: 0, completedStopIds: ['i-hotel', 'i-sensoji', 'i-izakaya'], skippedStopIds: [] },
     };
   }
 
   getTrip(): Trip { return structuredClone(this.trip); }
 
-  hydrate(trip: Trip): void { this.trip = structuredClone(trip); }
+  hydrate(trip: Trip): void {
+    if (!trip || !Array.isArray(trip.travelers) || !Array.isArray(trip.itinerary)) throw new Error('Saved trip data is invalid. Reset the demo to recover.');
+    const migrated = structuredClone(trip);
+    migrated.schemaVersion = 2;
+    migrated.request.travelers = migrated.travelers.length;
+    migrated.request.origin ??= 'San Francisco';
+    migrated.request.departureDate ??= '2026-10-12';
+    migrated.request.returnDate ??= '2026-10-16';
+    migrated.travelDna.confidence ??= 50;
+    migrated.travelDna.changes ??= [];
+    migrated.expenses ??= [];
+    migrated.progressState ??= {
+      completionPercent: migrated.progress,
+      scheduleVarianceMins: 0,
+      activeStopId: migrated.itinerary.find((item) => item.status === 'in-progress')?.id,
+      completedStopIds: migrated.itinerary.filter((item) => item.status === 'completed').map((item) => item.id),
+      skippedStopIds: migrated.itinerary.filter((item) => item.status === 'skipped').map((item) => item.id),
+    };
+    this.trip = migrated;
+    this.updateProgress();
+  }
 
-  completeStop(id: string): Trip {
+  reset(): Trip {
+    this.trip = new DemoStore().getTrip();
+    return this.getTrip();
+  }
+
+  addTraveler(input: Pick<Traveler, 'name' | 'phone'>): Trip {
+    const name = input.name.trim();
+    if (name.length < 2) throw new Error('Traveler name must contain at least two characters.');
+    if (this.trip.travelers.some((traveler) => traveler.name.toLowerCase() === name.toLowerCase())) throw new Error('Traveler names must be unique.');
+    const id = `t-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-${Date.now().toString(36)}`;
+    this.trip.travelers.push({ id, name, phone: input.phone?.trim(), initials: name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase(), budgetPreference: 'balanced', activityLevel: 3, pacePreference: 'balanced', foodPreference: 'No preference added', interests: interests({ culture: 3, food: 3, nature: 3 }) });
+    this.afterTravelerChange(`${name} added to the trip`);
+    return this.getTrip();
+  }
+
+  updateTraveler(id: string, input: Pick<Traveler, 'name' | 'phone'> & Partial<Pick<Traveler, 'budgetPreference' | 'activityLevel' | 'pacePreference' | 'foodPreference' | 'interests'>>): Trip {
+    const traveler = this.trip.travelers.find((item) => item.id === id);
+    if (!traveler) throw new Error('Traveler not found.');
+    const name = input.name.trim();
+    if (name.length < 2 || this.trip.travelers.some((item) => item.id !== id && item.name.toLowerCase() === name.toLowerCase())) throw new Error('Use a unique traveler name with at least two characters.');
+    Object.assign(traveler, { name, phone: input.phone?.trim(), initials: name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase(), ...(input.budgetPreference ? { budgetPreference: input.budgetPreference } : {}), ...(input.activityLevel ? { activityLevel: input.activityLevel } : {}), ...(input.pacePreference ? { pacePreference: input.pacePreference } : {}), ...(input.foodPreference ? { foodPreference: input.foodPreference } : {}), ...(input.interests ? { interests: input.interests } : {}) });
+    this.afterTravelerChange(`${name}'s traveler profile updated`);
+    return this.getTrip();
+  }
+
+  removeTraveler(id: string): Trip {
+    if (this.trip.travelers.length <= 2) throw new Error('A group trip must keep at least two travelers.');
+    const traveler = this.trip.travelers.find((item) => item.id === id);
+    if (!traveler) throw new Error('Traveler not found.');
+    this.trip.travelers = this.trip.travelers.filter((item) => item.id !== id);
+    this.afterTravelerChange(`${traveler.name} removed from the trip`);
+    return this.getTrip();
+  }
+
+  updateTripDetails(input: { origin: string; destination: string; departureDate: string; returnDate: string }): Trip {
+    const departure = new Date(`${input.departureDate}T12:00:00Z`);
+    const returning = new Date(`${input.returnDate}T12:00:00Z`);
+    if (!Number.isFinite(departure.getTime()) || !Number.isFinite(returning.getTime()) || returning <= departure) throw new Error('Return date must be after the departure date.');
+    const destinationChanged = input.destination.trim().toLowerCase() !== this.trip.request.destination.toLowerCase();
+    const duration = Math.round((returning.getTime() - departure.getTime()) / 86_400_000) + 1;
+    this.trip.request = { ...this.trip.request, origin: input.origin.trim(), destination: input.destination.trim(), departureDate: input.departureDate, returnDate: input.returnDate, duration };
+    this.trip.name = `${input.destination.trim()}, together`;
+    this.trip.dates = `${departure.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}–${returning.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}`;
+    if (destinationChanged) {
+      this.trip.itinerary = itineraryFor(input.destination, duration);
+      this.setBookingOptions(input.destination);
+      this.trip.preferenceCollection = undefined;
+    }
+    const selectedFlight = this.trip.flights.find((flight) => flight.selected) ?? this.trip.flights[0];
+    const arrivalOffset = selectedFlight?.arrivalTime.includes('+1') ? 1 : 0;
+    const hotelNights = Math.max(1, duration - 1 - arrivalOffset);
+    this.trip.hotels = this.trip.hotels.map((hotel) => ({ ...hotel, totalPrice: hotel.price * hotelNights }));
+    const selectedHotel = this.trip.hotels.find((hotel) => hotel.selected) ?? this.trip.hotels[0];
+    if (selectedFlight && selectedHotel) this.recalculateBudget(selectedFlight.price * this.trip.travelers.length, selectedHotel.totalPrice);
+    this.trip.events.unshift({ id: `trip-details-${Date.now()}`, type: 'tired', title: 'Trip dates updated', createdAt: new Date().toISOString(), explanation: `${duration} calendar days from ${input.departureDate} through ${input.returnDate}; hotel nights are calculated from destination arrival.` });
+    this.updateProgress();
+    this.recalculateHappiness();
+    return this.getTrip();
+  }
+
+  startStop(id: string): Trip {
+    const stop = this.trip.itinerary.find((item) => item.id === id);
+    if (!stop) throw new Error('That itinerary stop no longer exists.');
+    if (stop.status === 'completed' || stop.status === 'skipped') throw new Error('That stop is already finished.');
+    this.trip.itinerary.forEach((item) => { if (item.status === 'in-progress') item.status = 'upcoming'; });
+    stop.status = 'in-progress';
+    stop.startedAt = new Date().toISOString();
+    this.ensureProgress().activeStopId = stop.id;
+    this.recordProgressEvent(`${stop.title} started`, `JourneyOS is tracking actual time against the planned ${stop.durationMins} minutes.`);
+    this.updateProgress();
+    return this.getTrip();
+  }
+
+  completeStop(id: string, actualDurationMins?: number): Trip {
     const stop = this.trip.itinerary.find((item) => item.id === id);
     if (!stop) throw new Error('That itinerary stop no longer exists.');
     stop.status = 'completed';
-    const dnaKey = stop.category === 'culture' || stop.category === 'museum' ? 'culture' : stop.category === 'food' ? 'food' : stop.category === 'nature' ? 'photography' : 'history';
-    this.trip.travelDna[dnaKey] = Math.min(5, this.trip.travelDna[dnaKey] + 1);
-    this.trip.progress = Math.min(100, this.trip.progress + 8);
-    this.trip.events.unshift({ id: `completed-${Date.now()}`, type: 'tired', title: `${stop.title} completed`, createdAt: new Date().toISOString(), explanation: `JourneyOS learned from time spent at ${stop.title} and increased the group’s ${dnaKey} signal for the next day.` });
+    stop.completedAt = new Date().toISOString();
+    stop.actualDurationMins = actualDurationMins ?? stop.durationMins;
+    stop.varianceMins = stop.actualDurationMins - stop.durationMins;
+    const dnaKey: TravelDnaChange['dimension'] = stop.category === 'culture' || stop.category === 'museum' ? 'culture' : stop.category === 'food' ? 'food' : stop.category === 'nature' ? 'photography' : 'history';
+    const before = this.trip.travelDna[dnaKey];
+    const after = Math.min(5, Number((before + (stop.varianceMins > 0 ? 0.5 : 0.25)).toFixed(2)));
+    this.trip.travelDna[dnaKey] = after;
+    this.trip.travelDna.confidence = Math.min(100, (this.trip.travelDna.confidence ?? 50) + 4);
+    const reason = `${stop.title} took ${stop.actualDurationMins} minutes versus ${stop.durationMins} planned; ${dnaKey} moved from ${before} to ${after}.`;
+    this.trip.travelDna.changes = [{ id: `dna-${Date.now()}`, dimension: dnaKey, before, after, reason, createdAt: new Date().toISOString() }, ...(this.trip.travelDna.changes ?? [])].slice(0, 12);
+    this.trip.travelDna.learning = reason;
+    const progress = this.ensureProgress();
+    progress.scheduleVarianceMins += stop.varianceMins;
+    progress.activeStopId = undefined;
+    this.recordProgressEvent(`${stop.title} completed`, reason);
+    if (stop.varianceMins >= 20) this.shiftRemainingStops(stop.day, stop.id, stop.varianceMins);
+    this.updateProgress();
+    this.recalculateHappiness();
+    return this.getTrip();
+  }
+
+  skipStop(id: string): Trip {
+    const stop = this.trip.itinerary.find((item) => item.id === id);
+    if (!stop) throw new Error('That itinerary stop no longer exists.');
+    stop.status = 'skipped';
+    this.ensureProgress().activeStopId = undefined;
+    this.recordProgressEvent(`${stop.title} skipped`, 'JourneyOS removed the stop from progress and preserved the remaining route.');
+    this.updateProgress();
+    this.recalculateHappiness();
+    return this.getTrip();
+  }
+
+  reportDelay(minutes: number): Trip {
+    if (minutes < 1 || minutes > 240) throw new Error('Delay must be between 1 and 240 minutes.');
+    const activeId = this.ensureProgress().activeStopId;
+    const active = this.trip.itinerary.find((item) => item.id === activeId) ?? this.trip.itinerary.find((item) => !['completed', 'skipped'].includes(item.status));
+    if (active) this.shiftRemainingStops(active.day, active.id, minutes);
+    this.ensureProgress().scheduleVarianceMins += minutes;
+    this.recordProgressEvent(`Group running ${minutes} minutes late`, 'Remaining flexible stops were retimed while booked travel and completed activities stayed fixed.');
+    this.updateProgress();
+    this.recalculateHappiness();
     return this.getTrip();
   }
 
   applyPreferenceCollection(collection: PreferenceCollection): Trip {
-    this.trip.preferenceCollection = { ...collection, status: 'pending' };
+    const happiness = groupHappiness(this.trip.travelers, this.trip.itinerary, this.trip.request.duration);
+    this.trip.preferenceCollection = {
+      ...collection,
+      status: 'pending',
+      approvalSummary: `${this.trip.request.destination} proposal: ${happiness.groupHappiness}% group happiness, ${happiness.fairnessGap}-point fairness gap, and no traveler below ${Math.min(...happiness.individual.map((item) => item.happiness))}% plan fit.`,
+      calls: collection.calls.map((call) => {
+        const result = happiness.individual.find((item) => item.travelerId === call.travelerId);
+        return result ? { ...call, happiness: result.happiness, happinessBreakdown: result.breakdown, happinessExplanation: result.explanation } : call;
+      }),
+    };
     this.trip.groupPreference = {
       ...this.trip.groupPreference,
       recommendedPace: 'Admin-led balanced discovery',
       explanation: `${collection.adminName}'s priorities receive a 1.5× planning weight. ${collection.negotiation}`,
+      groupHappiness: happiness.groupHappiness,
+      averageHappiness: happiness.averageHappiness,
+      fairnessPenalty: happiness.fairnessPenalty,
+      fairnessGap: happiness.fairnessGap,
     };
     this.trip.events.unshift({ id: `preferences-${Date.now()}`, type: 'tired', title: 'Group preferences collected', createdAt: new Date().toISOString(), explanation: collection.approvalSummary });
     return this.getTrip();
@@ -191,6 +337,8 @@ export class DemoStore {
       status: 'approved',
       approvalSummary: `${this.trip.request.destination} is approved for planning. ${ranked.map((interest) => interest[0].toUpperCase() + interest.slice(1)).join(', ')} lead the group route.`,
     };
+    this.reprioritizeItinerary(interestScores);
+    this.recalculateHappiness();
     this.trip.events.unshift({ id: `preferences-approved-${Date.now()}`, type: 'tired', title: 'Admin approved group preferences', createdAt: new Date().toISOString(), explanation: this.trip.preferenceCollection.approvalSummary });
     return this.getTrip();
   }
@@ -198,7 +346,7 @@ export class DemoStore {
   selectFlight(flightId: string): Trip {
     this.trip.flights = this.trip.flights.map((flight) => ({ ...flight, selected: flight.id === flightId }));
     const selected = this.trip.flights.find((flight) => flight.id === flightId);
-    if (selected) this.recalculateBudget(selected.price * 4, this.trip.budget.hotel);
+    if (selected) this.recalculateBudget(selected.price * this.trip.travelers.length, this.trip.budget.hotel);
     return this.getTrip();
   }
 
@@ -209,20 +357,28 @@ export class DemoStore {
     return this.getTrip();
   }
 
-  updateFromRequest(request: Trip['request'], places: PlaceAttraction[] = []): Trip {
+  updateFromRequest(request: Trip['request'], places: PlaceAttraction[] = [], briefTranscript?: string): Trip {
     this.trip.request = { ...this.trip.request, ...request };
+    this.trip.travelers = this.trip.travelers.slice(0, Math.max(1, request.travelers));
+    while (this.trip.travelers.length < request.travelers) {
+      const number = this.trip.travelers.length + 1;
+      this.trip.travelers.push({ id: `t-traveler-${number}`, name: `Traveler ${number}`, initials: `T${number}`, budgetPreference: 'balanced', activityLevel: 3, pacePreference: 'balanced', foodPreference: 'No preference added', interests: interests({ culture: 3, food: 3, nature: 3 }) });
+    }
     this.trip.name = `${request.destination}, together`;
     this.trip.itinerary = places.length >= 2 ? itineraryFromPlaces(request.duration, places) : itineraryFor(request.destination, request.duration);
     this.setBookingOptions(request.destination);
     this.trip.events = [{ id: `brief-${Date.now()}`, type: 'tired', title: `${request.destination} trip brief created`, createdAt: new Date().toISOString(), explanation: `${places.length >= 2 ? 'Google Places sourced real attractions for' : 'A curated route is ready for'} your ${request.duration}-day ${request.destination} itinerary. Every page now reflects this proposed trip.` }];
     this.trip.groupPreference = { ...this.trip.groupPreference, explanation: `The ${request.destination} route prioritizes ${request.interests.slice(0, 3).join(', ')} while keeping the group’s preferred pace.` };
     this.trip.preferenceCollection = undefined;
+    this.trip.briefTranscript = briefTranscript;
+    this.trip.expenses = [];
     return this.getTrip();
   }
 
-  replan(type: TripEvent['type']): Trip {
+  replan(type: TripEvent['type'], activeDay?: number): Trip {
     if (!this.trip.request.destination.toLowerCase().includes('japan')) {
-      const next = this.trip.itinerary.find((item) => item.status === 'upcoming');
+      const next = this.trip.itinerary.find((item) => item.status === 'upcoming' && (!activeDay || item.day === activeDay))
+        ?? this.trip.itinerary.find((item) => item.status === 'upcoming');
       const updates: Record<TripEvent['type'], { title: string; explanation: string }> = {
         late: { title: 'Running late +90 minutes', explanation: `JourneyOS moved the next ${this.trip.request.destination} stop later and protected the group’s highest-priority experience.` },
         rain: { title: 'Heavy rain forecast', explanation: `JourneyOS swapped the next outdoor ${this.trip.request.destination} moment for an indoor cultural option and kept travel time low.` },
@@ -285,13 +441,92 @@ export class DemoStore {
     return this.getTrip();
   }
 
-  addReceipt(amount: number, restaurant: string): Trip {
+  addReceipt(amount: number, restaurant: string, paidBy?: string, participantIds?: string[], category: 'food' | 'transport' | 'activity' | 'other' = 'food'): Trip {
+    const payer = this.trip.travelers.find((traveler) => traveler.id === paidBy)?.id ?? this.trip.travelers[0].id;
+    const participants = participantIds?.filter((id) => this.trip.travelers.some((traveler) => traveler.id === id)) ?? this.trip.travelers.map((traveler) => traveler.id);
+    this.trip.expenses ??= [];
+    this.trip.expenses.unshift({ id: `expense-${Date.now()}`, description: restaurant, category, amount, paidBy: payer, participantIds: participants.length ? participants : [payer], createdAt: new Date().toISOString() });
     this.trip.budget.food += amount;
     this.trip.budget.spent += amount;
     this.trip.budget.remaining = this.trip.budget.total - this.trip.budget.spent;
     this.trip.travelDna.food = Math.min(5, this.trip.travelDna.food + 0.15);
     this.trip.events.unshift({ id: `receipt-${Date.now()}`, type: 'late', title: `Receipt captured · ${restaurant}`, createdAt: new Date().toISOString(), explanation: `$${amount.toFixed(2)} was added to the live food budget and strengthens the group’s food preference signal.` });
     return this.getTrip();
+  }
+
+  deleteReceipt(receiptId: string): Trip {
+    const expense = (this.trip.expenses ?? []).find((item) => item.id === receiptId);
+    if (!expense) throw new Error('Receipt not found');
+    this.trip.expenses = (this.trip.expenses ?? []).filter((item) => item.id !== receiptId);
+    this.trip.budget.spent = Math.max(0, this.trip.budget.spent - expense.amount);
+    if (expense.category === 'food') this.trip.budget.food = Math.max(0, this.trip.budget.food - expense.amount);
+    this.trip.budget.remaining = this.trip.budget.total - this.trip.budget.spent;
+    this.trip.events.unshift({ id: `receipt-delete-${Date.now()}`, type: 'late', title: `Receipt removed · ${expense.description}`, createdAt: new Date().toISOString(), explanation: `$${expense.amount.toFixed(2)} was removed and every traveler settlement was recalculated.` });
+    return this.getTrip();
+  }
+
+  private ensureProgress() {
+    this.trip.progressState ??= { completionPercent: this.trip.progress, scheduleVarianceMins: 0, completedStopIds: [], skippedStopIds: [] };
+    return this.trip.progressState;
+  }
+
+  private updateProgress() {
+    const progress = this.ensureProgress();
+    progress.completedStopIds = this.trip.itinerary.filter((item) => item.status === 'completed').map((item) => item.id);
+    progress.skippedStopIds = this.trip.itinerary.filter((item) => item.status === 'skipped').map((item) => item.id);
+    progress.completionPercent = this.trip.itinerary.length === 0 ? 0 : Math.round(((progress.completedStopIds.length + progress.skippedStopIds.length) / this.trip.itinerary.length) * 100);
+    progress.lastUpdatedAt = new Date().toISOString();
+    this.trip.progress = progress.completionPercent;
+  }
+
+  private recordProgressEvent(title: string, explanation: string) {
+    this.trip.events.unshift({ id: `progress-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, type: 'late', title, createdAt: new Date().toISOString(), explanation });
+  }
+
+  private shiftRemainingStops(day: number, afterId: string, minutes: number) {
+    let found = false;
+    for (const item of this.trip.itinerary.filter((entry) => entry.day === day).sort((a, b) => a.time.localeCompare(b.time))) {
+      if (item.id === afterId) { found = true; continue; }
+      if (!found || item.status === 'completed' || item.category === 'transport' || item.category === 'stay') continue;
+      const [hours, mins] = item.time.split(':').map(Number);
+      const total = hours * 60 + mins + minutes;
+      item.time = `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+      item.status = 'moved';
+    }
+  }
+
+  private afterTravelerChange(title: string) {
+    this.trip.request.travelers = this.trip.travelers.length;
+    const keys: Interest[] = ['culture', 'history', 'food', 'photography', 'shopping', 'nightlife', 'nature'];
+    for (const key of keys) this.trip.groupPreference.interestScores[key] = Number((this.trip.travelers.reduce((sum, traveler) => sum + traveler.interests[key], 0) / this.trip.travelers.length).toFixed(2));
+    if (this.trip.preferenceCollection) this.trip.preferenceCollection = { ...this.trip.preferenceCollection, status: 'pending', calls: this.trip.preferenceCollection.calls.filter((call) => this.trip.travelers.some((traveler) => traveler.id === call.travelerId)) };
+    const selected = this.trip.flights.find((flight) => flight.selected);
+    if (selected) this.recalculateBudget(selected.price * this.trip.travelers.length, this.trip.budget.hotel);
+    this.trip.events.unshift({ id: `traveler-${Date.now()}`, type: 'tired', title, createdAt: new Date().toISOString(), explanation: 'Group preference averages, booking totals, payment participants, and prior approval were recalculated.' });
+    this.recalculateHappiness();
+  }
+
+  private recalculateHappiness() {
+    const result = groupHappiness(this.trip.travelers, this.trip.itinerary, this.trip.request.duration);
+    Object.assign(this.trip.groupPreference, { groupHappiness: result.groupHappiness, averageHappiness: result.averageHappiness, fairnessPenalty: result.fairnessPenalty, fairnessGap: result.fairnessGap });
+    if (this.trip.preferenceCollection) this.trip.preferenceCollection.calls = this.trip.preferenceCollection.calls.map((call) => {
+      const individual = result.individual.find((item) => item.travelerId === call.travelerId);
+      return individual ? { ...call, happiness: individual.happiness, happinessBreakdown: individual.breakdown, happinessExplanation: individual.explanation } : call;
+    });
+  }
+
+  private reprioritizeItinerary(scores: GroupPreference['interestScores']) {
+    const scoreFor = (item: ItineraryItem) => item.category === 'food' ? scores.food : item.category === 'nature' ? (scores.nature + scores.photography) / 2 : item.category === 'culture' ? (scores.culture + scores.history) / 2 : item.category === 'museum' ? (scores.history + scores.culture) / 2 : item.category === 'experience' ? (scores.photography + scores.shopping + scores.nightlife) / 3 : 0;
+    for (const day of new Set(this.trip.itinerary.map((item) => item.day))) {
+      const flexible = this.trip.itinerary.filter((item) => item.day === day && !['completed', 'skipped', 'closed'].includes(item.status) && !['stay', 'transport'].includes(item.category)).sort((a, b) => a.time.localeCompare(b.time));
+      const slots = flexible.map((item) => item.time);
+      const ordered = flexible.slice().sort((a, b) => scoreFor(b) - scoreFor(a) || a.time.localeCompare(b.time));
+      ordered.forEach((item, index) => {
+        if (item.time !== slots[index]) item.status = 'moved';
+        item.time = slots[index];
+      });
+    }
+    this.trip.itinerary.sort((a, b) => a.day - b.day || a.time.localeCompare(b.time));
   }
 
   private move(id: string, day: number, time: string, status: ItineraryItem['status']) {

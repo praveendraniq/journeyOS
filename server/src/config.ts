@@ -23,7 +23,8 @@ export const config = {
   },
   vocalBridge: {
     apiKey: process.env.VOCAL_BRIDGE_API_KEY,
-    baseUrl: process.env.VOCAL_BRIDGE_BASE_URL,
+    baseUrl: process.env.VOCAL_BRIDGE_API_URL ?? process.env.VOCAL_BRIDGE_BASE_URL,
+    agentId: process.env.VOCAL_BRIDGE_AGENT_ID,
   },
   landingAi: {
     apiKey: process.env.LANDING_AI_API_KEY,
@@ -31,5 +32,8 @@ export const config = {
   },
   googlePlaces: {
     apiKey: process.env.GOOGLE_PLACES_API_KEY,
+  },
+  googleWeather: {
+    apiKey: process.env.GOOGLE_WEATHER_API_KEY ?? process.env.GOOGLE_PLACES_API_KEY,
   },
 };

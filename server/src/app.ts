@@ -6,21 +6,25 @@ import { DemoStore } from './store/demo-store.js';
 import { LandingAiService } from './services/landing-ai.service.js';
 import { GooglePlacesService } from './services/google-places.service.js';
 import type { PlaceAttraction } from './services/google-places.service.js';
-import { PayPalService } from './services/payment.service.js';
+import { knownBookingTotal, PayPalService } from './services/payment.service.js';
 import { RouteOptimizer } from './services/route-optimizer.service.js';
 import { SabreService } from './services/sabre.service.js';
 import { VocalBridgeService } from './services/voice-planner.service.js';
+import { WeatherService } from './services/weather.service.js';
 import type { PaymentOrder, TripEvent } from './types.js';
 
-const replanSchema = z.object({ type: z.enum(['late', 'rain', 'flight-delay', 'closed', 'tired']), trip: z.unknown().optional() });
+const replanSchema = z.object({ type: z.enum(['late', 'rain', 'flight-delay', 'closed', 'tired']), activeDay: z.number().int().min(1).optional(), trip: z.unknown().optional() });
 const requestSchema = z.object({ conversation: z.string().min(3).max(1000) });
 const hydrateTripSchema = z.object({ trip: z.unknown() });
 const preferenceCollectionSchema = z.object({ adminName: z.string().min(2).max(60), adminPhone: z.string().min(7).max(30), phones: z.record(z.string(), z.string().min(7).max(30)), trip: z.unknown().optional() });
 const preferenceDecisionSchema = z.object({ interestScores: z.record(z.string(), z.number().min(1).max(5)), trip: z.unknown().optional() });
 const selectionSchema = z.object({ id: z.string().min(1), trip: z.unknown().optional() });
-const completeStopSchema = z.object({ id: z.string().min(1), trip: z.unknown().optional() });
-const receiptSchema = z.object({ amount: z.number().positive().optional(), restaurant: z.string().min(1).optional(), fileName: z.string().optional() });
+const progressSchema = z.object({ id: z.string().min(1).optional(), action: z.enum(['start', 'complete', 'skip', 'delay']), actualDurationMins: z.number().int().min(1).max(720).optional(), minutes: z.number().int().min(1).max(240).optional(), trip: z.unknown().optional() });
+const travelerSchema = z.object({ action: z.enum(['add', 'update', 'remove']), id: z.string().min(1).optional(), name: z.string().min(2).max(60).optional(), phone: z.string().max(30).optional(), budgetPreference: z.enum(['value', 'balanced', 'premium']).optional(), activityLevel: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]).optional(), pacePreference: z.enum(['easy', 'balanced', 'full']).optional(), foodPreference: z.string().min(2).max(100).optional(), interests: z.object({ culture: z.number().min(1).max(5), history: z.number().min(1).max(5), food: z.number().min(1).max(5), photography: z.number().min(1).max(5), shopping: z.number().min(1).max(5), nightlife: z.number().min(1).max(5), nature: z.number().min(1).max(5) }).optional(), trip: z.unknown().optional() });
+const tripDetailsSchema = z.object({ origin: z.string().min(2).max(80), destination: z.string().min(2).max(80), departureDate: z.string().date(), returnDate: z.string().date(), trip: z.unknown().optional() });
+const receiptSchema = z.object({ amount: z.number().positive().optional(), restaurant: z.string().min(1).optional(), fileName: z.string().optional(), category: z.enum(['food', 'transport', 'activity', 'other']).optional(), paidBy: z.string().optional(), participantIds: z.array(z.string()).optional(), trip: z.unknown().optional() });
 const orderSchema = z.object({ percentages: z.record(z.string(), z.number().min(0).max(100)).optional() }).superRefine((value, ctx) => { if (value.percentages && Math.abs(Object.values(value.percentages).reduce((sum, item) => sum + item, 0) - 100) > 0.01) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Custom split must total 100%' }); });
+const weatherSchema = z.object({ destination: z.string().min(2).max(80) });
 
 export const createApp = () => {
   const store = new DemoStore();
@@ -30,6 +34,7 @@ export const createApp = () => {
   const routeOptimizer = new RouteOptimizer();
   const receipts = new LandingAiService();
   const places = new GooglePlacesService();
+  const weather = new WeatherService();
   const orders = new Map<string, PaymentOrder>();
   const app = express();
 
@@ -38,9 +43,28 @@ export const createApp = () => {
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, mockMode: config.mockMode }));
   app.get('/api/trips/demo', (_req, res) => res.json({ trip: store.getTrip(), mode: config.mockMode ? 'demo' : 'live' }));
+  app.get('/api/weather', async (req, res, next) => {
+    try { const { destination } = weatherSchema.parse(req.query); res.json({ weather: await weather.current(destination) }); }
+    catch (error) { next(error); }
+  });
   app.post('/api/trips/hydrate', (req, res, next) => {
     try { const { trip } = hydrateTripSchema.parse(req.body); store.hydrate(trip as ReturnType<typeof store.getTrip>); res.json({ trip: store.getTrip() }); }
     catch (error) { next(error); }
+  });
+  app.post('/api/trips/reset', (_req, res) => res.json({ trip: store.reset() }));
+  app.post('/api/trips/details', (req, res, next) => {
+    try { const input = tripDetailsSchema.parse(req.body); if (input.trip) store.hydrate(input.trip as ReturnType<typeof store.getTrip>); res.json({ trip: store.updateTripDetails(input) }); }
+    catch (error) { next(error); }
+  });
+  app.post('/api/travelers', (req, res, next) => {
+    try {
+      const input = travelerSchema.parse(req.body);
+      if (input.trip) store.hydrate(input.trip as ReturnType<typeof store.getTrip>);
+      if (input.action === 'add' && input.name) return res.json({ trip: store.addTraveler({ name: input.name, phone: input.phone }) });
+      if (input.action === 'update' && input.id && input.name) return res.json({ trip: store.updateTraveler(input.id, { name: input.name, phone: input.phone, budgetPreference: input.budgetPreference, activityLevel: input.activityLevel, pacePreference: input.pacePreference, foodPreference: input.foodPreference, interests: input.interests }) });
+      if (input.action === 'remove' && input.id) return res.json({ trip: store.removeTraveler(input.id) });
+      return res.status(400).json({ error: 'Traveler action is missing required fields.' });
+    } catch (error) { next(error); }
   });
 
   app.post('/api/planner/extract', async (req, res, next) => {
@@ -54,7 +78,7 @@ export const createApp = () => {
         placesDiagnostic = error instanceof Error ? error.message : 'Google Places request failed';
         console.warn('Google Places unavailable; using curated itinerary.', placesDiagnostic);
       }
-      const trip = store.updateFromRequest(result.request, attractions);
+      const trip = store.updateFromRequest(result.request, attractions, conversation);
       const itinerarySource = attractions.length >= 2 ? 'google-places' : 'curated-fallback';
       res.json({ ...result, trip, itinerarySource, placesDiagnostic: placesDiagnostic ?? (itinerarySource === 'curated-fallback' ? 'Google Places returned fewer than two attractions.' : undefined), summary: `${result.request.duration} days in ${result.request.destination} for ${result.request.travelers} travelers, with a $${result.request.budget.toLocaleString()} budget.` });
     } catch (error) { next(error); }
@@ -90,8 +114,16 @@ export const createApp = () => {
     try { const input = selectionSchema.parse(req.body); if (input.trip) store.hydrate(input.trip as ReturnType<typeof store.getTrip>); res.json({ trip: store.selectHotel(input.id) }); }
     catch (error) { next(error); }
   });
-  app.post('/api/itinerary/complete', (req, res, next) => {
-    try { const input = completeStopSchema.parse(req.body); if (input.trip) store.hydrate(input.trip as ReturnType<typeof store.getTrip>); res.json({ trip: store.completeStop(input.id) }); }
+  app.post('/api/itinerary/progress', (req, res, next) => {
+    try {
+      const input = progressSchema.parse(req.body);
+      if (input.trip) store.hydrate(input.trip as ReturnType<typeof store.getTrip>);
+      if (input.action === 'delay') return res.json({ trip: store.reportDelay(input.minutes ?? 30) });
+      if (!input.id) return res.status(400).json({ error: 'An itinerary stop is required.' });
+      if (input.action === 'start') return res.json({ trip: store.startStop(input.id) });
+      if (input.action === 'skip') return res.json({ trip: store.skipStop(input.id) });
+      return res.json({ trip: store.completeStop(input.id, input.actualDurationMins) });
+    }
     catch (error) { next(error); }
   });
 
@@ -102,9 +134,9 @@ export const createApp = () => {
 
   app.post('/api/operations/replan', (req, res, next) => {
     try {
-      const { type, trip: clientTrip } = replanSchema.parse(req.body);
+      const { type, activeDay, trip: clientTrip } = replanSchema.parse(req.body);
       if (clientTrip) store.hydrate(clientTrip as ReturnType<typeof store.getTrip>);
-      const trip = store.replan(type as TripEvent['type']);
+      const trip = store.replan(type as TripEvent['type'], activeDay);
       res.json({ trip, event: trip.events[0], itinerary: routeOptimizer.optimize(trip.itinerary, { raining: type === 'rain' }) });
     } catch (error) { next(error); }
   });
@@ -113,7 +145,7 @@ export const createApp = () => {
     try {
       const trip = store.getTrip();
       const { percentages } = orderSchema.parse(req.body ?? {});
-      const order = await payments.createOrder(trip.budget.spent, trip.travelers, percentages);
+      const order = await payments.createOrder(knownBookingTotal(trip), trip.travelers, percentages);
       orders.set(order.id, order);
       res.json({ order });
     } catch (error) { next(error); }
@@ -130,10 +162,19 @@ export const createApp = () => {
 
   app.post('/api/receipts/analyze', async (req, res, next) => {
     try {
-      const result = await receipts.analyzeReceipt(receiptSchema.parse(req.body));
+      const input = receiptSchema.parse(req.body);
+      if (input.trip) store.hydrate(input.trip as ReturnType<typeof store.getTrip>);
+      const result = await receipts.analyzeReceipt(input);
       const amount = Number((result as { amount: number }).amount);
       const restaurant = String((result as { restaurant: string }).restaurant);
-      res.json({ receipt: result, trip: store.addReceipt(amount, restaurant) });
+      res.json({ receipt: result, trip: store.addReceipt(amount, restaurant, input.paidBy, input.participantIds, input.category) });
+    } catch (error) { next(error); }
+  });
+
+  app.delete('/api/receipts/:receiptId', (req, res, next) => {
+    try {
+      if (req.body?.trip) store.hydrate(req.body.trip as ReturnType<typeof store.getTrip>);
+      res.json({ trip: store.deleteReceipt(req.params.receiptId) });
     } catch (error) { next(error); }
   });
 

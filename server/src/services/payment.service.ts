@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
-import type { PaymentOrder, Traveler } from '../types.js';
+import type { PaymentOrder, Traveler, Trip } from '../types.js';
+
+export const knownBookingTotal = (trip: Pick<Trip, 'budget'>): number => trip.budget.flight + trip.budget.hotel;
 
 export class PayPalService {
   async createOrder(total: number, travelers: Traveler[], percentages?: Record<string, number>): Promise<PaymentOrder> {

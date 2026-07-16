@@ -29,7 +29,9 @@ export class VocalBridgeService {
 
     const value = conversation.toLowerCase();
     const request = structuredClone(defaultRequest);
-    const destination = value.match(/(?:to|in|visit)\s+([a-z ]+?)(?:\s+(?:for|under|with|this|next)|[.,]|$)/i)?.[1]?.trim();
+    const destinationMatch = value.match(/(?:to|in|visit|visiting|as|destination is)\s+([a-z][a-z '-]+?)(?:\s+(?:for|under|with|from|during|and|this|next)\b|[.,]|$)/i)?.[1]?.trim();
+    const knownDestination = ['china', 'japan', 'kyoto', 'tokyo', 'bali', 'thailand', 'bangkok', 'paris', 'france', 'italy', 'rome', 'spain', 'london', 'greece', 'mexico', 'india', 'singapore', 'australia', 'new zealand'].find((place) => new RegExp(`\\b${place}\\b`, 'i').test(value));
+    const destination = destinationMatch ?? knownDestination;
     if (destination) request.destination = destination.replace(/\b\w/g, (letter) => letter.toUpperCase());
     const duration = value.match(/(\d+|one|two|three|four|five|six|seven|eight|nine|ten)[ -]?day/);
     if (duration) request.duration = toNumber(duration[1]);
@@ -49,16 +51,24 @@ export class VocalBridgeService {
     if (/slow|relax|easy/.test(value)) request.travelStyle = 'slow, restorative';
     if (/fast|packed|adventure/.test(value)) request.travelStyle = 'high-energy exploration';
     if (/vegetarian|vegan/.test(value)) request.foodPreferences = ['vegetarian friendly', ...request.foodPreferences.filter((food) => food !== 'vegetarian friendly')];
-    return { request, source: 'mock', confidence: 0.94 };
+    const confidence = Math.min(0.97, 0.58
+      + (destination ? 0.1 : 0)
+      + (duration ? 0.08 : 0)
+      + (people ? 0.07 : 0)
+      + (budget ? 0.07 : 0)
+      + (extracted.length ? 0.05 : 0)
+      + (/vegetarian|vegan|allergy|shellfish|gluten/.test(value) ? 0.03 : 0));
+    return { request, source: 'mock', confidence: Number(confidence.toFixed(2)) };
   }
 
   async collectPreferences(input: { adminName: string; adminPhone: string; phones: Record<string, string>; travelers: Traveler[]; destination: string }): Promise<PreferenceCollection> {
     const participants = input.travelers.filter((traveler) => traveler.name !== input.adminName);
-    if (!config.mockMode && config.vocalBridge.baseUrl && config.vocalBridge.apiKey) {
+    if (!config.mockMode && config.vocalBridge.baseUrl && config.vocalBridge.apiKey && config.vocalBridge.agentId) {
       const response = await fetch(`${config.vocalBridge.baseUrl.replace(/\/$/, '')}/v1/calls/group-preferences`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.vocalBridge.apiKey}` },
         body: JSON.stringify({
+          agentId: config.vocalBridge.agentId,
           admin: { name: input.adminName, phone: input.adminPhone, priorityWeight: 1.5 },
           destination: input.destination,
           travelers: participants.map((traveler) => ({ id: traveler.id, name: traveler.name, phone: input.phones[traveler.id] })),
@@ -72,6 +82,8 @@ export class VocalBridgeService {
 
     const calls = participants.map((traveler, index) => {
       const priorities = Object.entries(traveler.interests).sort(([, a], [, b]) => b - a).slice(0, 2).map(([interest]) => interest);
+      const adminPriority = 'a protected culture-and-history morning';
+      const travelerTrade = `${priorities[0]} time and a ${traveler.pacePreference} pace`;
       return {
         travelerId: traveler.id,
         name: traveler.name,
@@ -81,6 +93,11 @@ export class VocalBridgeService {
         happiness: [88, 84, 86][index] ?? 85,
         topPriorities: priorities,
         compromise: `Keeps a ${priorities[0]} highlight while reserving open time for ${input.adminName}'s culture-led itinerary.`,
+        dialogue: [
+          { speaker: 'agent' as const, text: `${traveler.name}, your ${priorities[0]} preference matters. ${input.adminName}'s non-negotiable is ${adminPriority}. Would you support that if I protect ${travelerTrade} later the same day?` },
+          { speaker: 'traveler' as const, text: `Yes—if the ${priorities[0]} stop is genuinely protected and the schedule does not feel rushed.` },
+          { speaker: 'agent' as const, text: `Agreed. I will lock that trade-off into the proposal and show it explicitly to the admin before the itinerary changes.` },
+        ],
       };
     });
     return {
