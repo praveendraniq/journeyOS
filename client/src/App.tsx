@@ -228,6 +228,7 @@ function VoicePlanner({ trip, onTrip }: { trip: Trip; onTrip: (trip: Trip, note:
     chunkTimerRef.current = setInterval(() => {
       setChunkSeconds((seconds) => {
         const next = seconds + 1;
+        if (next < 40) setSpeechStatus(`Part ${chunkNumber} of your brief · ${next}s of 45s`);
         if (next === 40) setSpeechStatus('40 seconds captured. JourneyOS will pause in 5 seconds — tap the microphone to continue.');
         if (next >= 45) {
           recognitionRef.current?.stop();
@@ -239,7 +240,7 @@ function VoicePlanner({ trip, onTrip }: { trip: Trip; onTrip: (trip: Trip, note:
       });
     }, 1000);
     return () => { if (chunkTimerRef.current) clearInterval(chunkTimerRef.current); };
-  }, [listening, speechSupported]);
+  }, [chunkNumber, listening, speechSupported]);
   useEffect(() => () => {
     recognitionRef.current?.abort();
     if (mockVoiceTimeoutRef.current) clearTimeout(mockVoiceTimeoutRef.current);
