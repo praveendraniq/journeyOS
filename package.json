@@ -1,0 +1,15 @@
+{
+  "name": "journeyos",
+  "private": true,
+  "version": "0.1.0",
+  "description": "JourneyOS hackathon MVP - AI travel operating system",
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,magenta \"pnpm --dir server dev\" \"pnpm --dir client dev\"",
+    "build": "pnpm --dir server build && pnpm --dir client build",
+    "start": "pnpm --dir server start",
+    "lint": "pnpm --dir server typecheck && pnpm --dir client typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

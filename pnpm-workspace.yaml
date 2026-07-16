@@ -1,0 +1,8 @@
+packages:
+  - client
+  - server
+
+onlyBuiltDependencies:
+  - esbuild
+allowBuilds:
+  esbuild: true

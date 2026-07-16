@@ -1,0 +1,20 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:wght@500;600&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { @apply border-stone-200; }
+  body { @apply m-0 bg-cream font-sans antialiased; font-family: 'Manrope', sans-serif; }
+  button, textarea { font: inherit; }
+  button { -webkit-tap-highlight-color: transparent; }
+}
+
+@layer components {
+  .font-display { font-family: 'Playfair Display', serif; }
+  .eyebrow { @apply text-[10px] font-extrabold uppercase tracking-[0.16em] text-stone-400; }
+  .soft-stat { @apply rounded-2xl bg-stone-50 px-4 py-3; }
+  .soft-stat > span { @apply block text-[10px] font-bold uppercase tracking-[0.1em] text-stone-400; }
+  .soft-stat > strong { @apply mt-1 block text-sm font-bold text-ink; }
+  .paper-grid { background-image: linear-gradient(rgba(36,91,79,.055) 1px, transparent 1px), linear-gradient(90deg, rgba(36,91,79,.055) 1px, transparent 1px); background-size: 22px 22px; }
+}
