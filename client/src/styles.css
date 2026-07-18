@@ -31,14 +31,14 @@
 .friend-setup label span {
   display: none;
 }
-.friend-setup label:has(input[placeholder="+14156290471"])::after {
+.friend-setup label:has(input[placeholder="+14155550101"])::after {
   content: "* Required";
   color: #245c4f;
   font-size: 0.7rem;
   font-weight: 700;
 }
 .friend-setup label:has(input:invalid)::after {
-  content: "Use +14156290471";
+  content: "Use +14155550101";
   color: #dc4c3f;
 }
 .friend-setup input:invalid {

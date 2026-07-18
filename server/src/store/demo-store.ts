@@ -18,7 +18,7 @@ const route = (id: string, day: number, time: string, title: string, subtitle: s
 });
 
 const MAX_ITINERARY_DAYS = 14;
-const DEFAULT_ADMIN = { name: 'Prabhu Siddharth', phone: '+14156290471' };
+const DEFAULT_ADMIN = { name: 'Hema', phone: '+14155550101' };
 const adminFromBrief = (brief: string | undefined, request: Trip['request']): Traveler => {
   const nameMatch = brief?.match(/(?:my name is|i am|i'm)\s+([a-z][a-z '-]{1,50})(?=[,.]|\s+(?:and|from|with|for|my|i)|$)/i)?.[1]?.trim();
   const phoneMatch = brief?.match(/(?:my (?:phone|number) is|call me at|my phone number is)\s*(\+?[\d().\s-]{7,})/i)?.[1];
@@ -526,7 +526,13 @@ export class DemoStore {
     this.trip.dates = `${departure.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}–${returning.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}`;
     // Partner voice flow: the first traveler is the organizer inferred from
     // the brief; the remaining slots are friends who can receive preference calls.
-    if (!hadPriorBrief) this.trip.travelers = [adminFromBrief(briefTranscript, normalizedRequest)];
+    if (!hadPriorBrief) {
+      const inferredAdmin = adminFromBrief(briefTranscript, normalizedRequest);
+      const existing = this.trip.travelers;
+      this.trip.travelers = existing.length
+        ? [{ ...existing[0], ...inferredAdmin, id: existing[0].id, phone: inferredAdmin.phone ?? existing[0].phone }, ...existing.slice(1)]
+        : [inferredAdmin];
+    }
     this.trip.travelers = this.trip.travelers.slice(0, Math.max(1, normalizedRequest.travelers));
     while (this.trip.travelers.length < normalizedRequest.travelers) {
       const number = this.trip.travelers.length + 1;
@@ -572,11 +578,23 @@ export class DemoStore {
       this.trip.events.unshift({ id: `event-${Date.now()}`, type, title: update.title, createdAt: new Date().toISOString(), explanation: update.explanation });
       return this.getTrip();
     }
+    const activeFlexibleStop = () => this.trip.itinerary.find((item) =>
+      item.day === activeDay
+      && !['completed', 'skipped', 'closed'].includes(item.status)
+      && !['stay', 'transport'].includes(item.category))
+      ?? this.trip.itinerary.find((item) => item.status === 'upcoming' && !['stay', 'transport'].includes(item.category));
     const changes: Record<TripEvent['type'], { title: string; explanation: string; mutate: () => void }> = {
       late: {
         title: 'Running late +90 minutes',
         explanation: 'The tea ceremony moved to Day 4 at 16:30. We kept your booked Shinkansen and removed the low-priority shopping buffer, so the group still reaches Arashiyama before closing.',
-        mutate: () => this.move('i-tea', 4, '16:30', 'moved'),
+        mutate: () => {
+          if (!activeDay) { this.move('i-tea', 4, '16:30', 'moved'); return; }
+          const item = activeFlexibleStop();
+          if (!item) return;
+          const [hour, minute] = item.time.split(':').map(Number);
+          const shifted = hour * 60 + minute + 90;
+          Object.assign(item, { time: `${String(Math.floor(shifted / 60) % 24).padStart(2, '0')}:${String(shifted % 60).padStart(2, '0')}`, status: 'moved' as const });
+        },
       },
       rain: {
         title: 'Heavy rain forecast',
@@ -603,7 +621,7 @@ export class DemoStore {
         title: 'Traveler energy is low',
         explanation: 'The full Fushimi Inari climb is now the first 45 minutes of gates, followed by a nearby café. This protects the group’s cultural highlight while reducing walking by 3.2 km.',
         mutate: () => {
-          const item = this.trip.itinerary.find((entry) => entry.id === 'i-fushimi');
+          const item = activeDay ? activeFlexibleStop() : this.trip.itinerary.find((entry) => entry.id === 'i-fushimi');
           if (item) Object.assign(item, { durationMins: 45, subtitle: 'Fushimi · Kyoto · short route', status: 'moved' });
         },
       },

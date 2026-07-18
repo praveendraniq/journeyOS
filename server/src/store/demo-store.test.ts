@@ -86,6 +86,15 @@ test('preserves the exact user brief after creating a trip', () => {
   assert.equal(updated.briefTranscript, transcript);
 });
 
+test('first trip brief preserves the named friend roster and call-ready phones', () => {
+  const store = new DemoStore();
+  const before = store.getTrip();
+  const expectedFriends = before.travelers.slice(1).map(({ name, phone }) => ({ name, phone }));
+  const updated = store.updateFromRequest(before.request, [], 'Tokyo with Hema, Prabhu, Deepu, and Sanjay');
+  assert.deepEqual(updated.travelers.slice(1).map(({ name, phone }) => ({ name, phone })), expectedFriends);
+  assert.ok(updated.travelers.every((traveler) => traveler.phone));
+});
+
 test('trip brief group size reconciles the editable traveler roster', () => {
   const store = new DemoStore();
   const request = store.getTrip().request;
@@ -126,4 +135,14 @@ test('applies generated-trip disruptions to the active day', () => {
   const changed = updated.itinerary.find((item) => item.day === 2 && item.status === 'moved');
   assert.ok(changed);
   assert.match(changed.title, /Indoor cultural alternative/);
+});
+
+test('voice tired replan changes only the selected Tokyo day', () => {
+  const store = new DemoStore();
+  const before = store.getTrip();
+  const dayOne = before.itinerary.filter((item) => item.day === 1).map((item) => ({ id: item.id, title: item.title, durationMins: item.durationMins }));
+  const updated = store.replan('tired', 2);
+  const changed = updated.itinerary.find((item) => item.day === 2 && item.status === 'moved' && item.title.startsWith('Shortened ') && item.durationMins <= 60);
+  assert.ok(changed);
+  assert.deepEqual(updated.itinerary.filter((item) => item.day === 1).map((item) => ({ id: item.id, title: item.title, durationMins: item.durationMins })), dayOne);
 });

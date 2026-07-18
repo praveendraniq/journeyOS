@@ -4,6 +4,16 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
+const hasVocalBridgeCli = async () => {
+  try {
+    await run('vb', ['--version'], { timeout: 5_000 });
+    return true;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    if (/ENOENT|not recognized|not found/i.test(detail)) return false;
+    throw error;
+  }
+};
 
 const defaultRequest: TripRequest = {
   origin: 'San Francisco', destination: 'Tokyo', departureDate: '2026-10-12', returnDate: '2026-10-16', duration: 5, travelers: 4, budget: 6000,
@@ -118,8 +128,9 @@ export class VocalBridgeService {
     // not a reliable way to decide who should receive a preference call.
     const participants = input.travelers.slice(1);
     if (!participants.length) throw new Error('Add at least one friend before starting preference calls.');
-    if (!config.mockMode && config.vocalBridge.apiKey && config.vocalBridge.agentId) {
+    if (!config.mockMode && config.vocalBridge.apiKey && config.vocalBridge.agentId && await hasVocalBridgeCli()) {
       const calls: PreferenceCollection['calls'] = [];
+      let useScriptedFallback = false;
       // Start one outbound interview only after the previous call request has
       // returned. This prevents every friend being dialed at once and keeps
       // the preference collector in a clear, admin-controlled sequence.
@@ -133,11 +144,14 @@ export class VocalBridgeService {
           calls.push({ travelerId: traveler.id, name: traveler.name, phone, status: 'queued', summary: 'Outbound preference call queued. JourneyOS will use the completed call transcript for the group proposal.', happiness: 0, topPriorities: [], compromise: 'Waiting for the traveler’s call.' });
         } catch (error) {
           const detail = error instanceof Error ? error.message : 'Unknown outbound call error';
-          if (/ENOENT/.test(detail)) throw new Error('Vocal Bridge CLI is not installed on this computer. Install it with: pip install vocal-bridge, then run vb auth login and vb agent use.');
+          if (!calls.length && /ENOENT|not recognized|not found|daily outbound call limit/i.test(detail)) {
+            useScriptedFallback = true;
+            break;
+          }
           throw new Error(`Could not start ${traveler.name}'s Vocal Bridge call: ${detail}`);
         }
       }
-      return {
+      if (!useScriptedFallback) return {
         adminName: input.adminName,
         adminWeight: 1.5,
         source: 'vocal-bridge',
