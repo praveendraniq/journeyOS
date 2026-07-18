@@ -168,6 +168,7 @@ export interface ExpenseReceipt {
   amount: number;
   paidBy: string;
   participantIds: string[];
+  splitPercentages?: Record<string, number>;
   createdAt: string;
 }
 

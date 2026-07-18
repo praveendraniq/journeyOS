@@ -35,7 +35,9 @@ const selectionSchema = z.object({ id: z.string().min(1), trip: z.unknown().opti
 const progressSchema = z.object({ id: z.string().min(1).optional(), action: z.enum(['start', 'complete', 'skip', 'delay']), actualDurationMins: z.number().int().min(1).max(720).optional(), minutes: z.number().int().min(1).max(240).optional(), trip: z.unknown().optional() });
 const travelerSchema = z.object({ action: z.enum(['add', 'update', 'remove']), id: z.string().min(1).optional(), name: z.string().min(2).max(60).optional(), phone: z.string().max(30).optional(), budgetPreference: z.enum(['value', 'balanced', 'premium']).optional(), activityLevel: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]).optional(), pacePreference: z.enum(['easy', 'balanced', 'full']).optional(), foodPreference: z.string().min(2).max(100).optional(), interests: z.object({ culture: z.number().min(1).max(5), history: z.number().min(1).max(5), food: z.number().min(1).max(5), photography: z.number().min(1).max(5), shopping: z.number().min(1).max(5), nightlife: z.number().min(1).max(5), nature: z.number().min(1).max(5) }).optional(), trip: z.unknown().optional() });
 const tripDetailsSchema = z.object({ origin: z.string().min(2).max(80), destination: z.string().min(2).max(80), departureDate: z.string().date(), returnDate: z.string().date(), trip: z.unknown().optional() });
-const receiptSchema = z.object({ amount: z.number().positive().optional(), restaurant: z.string().min(1).optional(), fileName: z.string().optional(), category: z.enum(['food', 'transport', 'activity', 'other']).optional(), paidBy: z.string().optional(), participantIds: z.array(z.string()).optional(), trip: z.unknown().optional() });
+const receiptSchema = z.object({ amount: z.number().positive().optional(), restaurant: z.string().min(1).optional(), fileName: z.string().optional(), category: z.enum(['food', 'transport', 'activity', 'other']).optional(), paidBy: z.string().optional(), participantIds: z.array(z.string()).optional(), splitPercentages: z.record(z.string(), z.number().min(0).max(100)).optional(), trip: z.unknown().optional() }).superRefine((value, ctx) => {
+  if (value.splitPercentages && Math.abs(Object.values(value.splitPercentages).reduce((sum, item) => sum + item, 0) - 100) > 0.01) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Receipt split must total 100%' });
+});
 const orderSchema = z.object({ percentages: z.record(z.string(), z.number().min(0).max(100)).optional(), total: z.number().positive().max(100_000).optional() }).superRefine((value, ctx) => { if (value.percentages && Math.abs(Object.values(value.percentages).reduce((sum, item) => sum + item, 0) - 100) > 0.01) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Custom split must total 100%' }); });
 const weatherSchema = z.object({ destination: z.string().min(2).max(80) });
 const voiceTokenSchema = z.object({ participant_name: z.string().min(1).max(80).optional() });
@@ -288,7 +290,7 @@ export const createApp = () => {
       const result = await receipts.analyzeReceipt(input);
       const amount = Number((result as { amount: number }).amount);
       const restaurant = String((result as { restaurant: string }).restaurant);
-      res.json({ receipt: result, trip: store.addReceipt(amount, restaurant, input.paidBy, input.participantIds, input.category) });
+      res.json({ receipt: result, trip: store.addReceipt(amount, restaurant, input.paidBy, input.participantIds, input.category, input.splitPercentages) });
     } catch (error) { next(error); }
   });
 

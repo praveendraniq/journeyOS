@@ -616,11 +616,15 @@ export class DemoStore {
     return this.getTrip();
   }
 
-  addReceipt(amount: number, restaurant: string, paidBy?: string, participantIds?: string[], category: 'food' | 'transport' | 'activity' | 'other' = 'food'): Trip {
+  addReceipt(amount: number, restaurant: string, paidBy?: string, participantIds?: string[], category: 'food' | 'transport' | 'activity' | 'other' = 'food', splitPercentages?: Record<string, number>): Trip {
     const payer = this.trip.travelers.find((traveler) => traveler.id === paidBy)?.id ?? this.trip.travelers[0].id;
     const participants = participantIds?.filter((id) => this.trip.travelers.some((traveler) => traveler.id === id)) ?? this.trip.travelers.map((traveler) => traveler.id);
     this.trip.expenses ??= [];
-    this.trip.expenses.unshift({ id: `expense-${Date.now()}`, description: restaurant, category, amount, paidBy: payer, participantIds: participants.length ? participants : [payer], createdAt: new Date().toISOString() });
+    const validParticipants = participants.length ? participants : [payer];
+    const customSplit = splitPercentages
+      ? Object.fromEntries(validParticipants.map((id) => [id, splitPercentages[id] ?? 0]))
+      : undefined;
+    this.trip.expenses.unshift({ id: `expense-${Date.now()}`, description: restaurant, category, amount, paidBy: payer, participantIds: validParticipants, splitPercentages: customSplit, createdAt: new Date().toISOString() });
     this.trip.budget.food += amount;
     this.trip.budget.spent += amount;
     this.trip.budget.remaining = this.trip.budget.total - this.trip.budget.spent;

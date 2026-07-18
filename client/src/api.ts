@@ -30,6 +30,6 @@ export const api = {
   replan: (type: ReplanType, trip: Trip, activeDay?: number) => request<{ trip: Trip; event: Trip['events'][number] }>('/api/operations/replan', { method: 'POST', body: JSON.stringify({ type, trip, activeDay }) }),
   createOrder: (percentages?: Record<string, number>, total?: number) => request<{ order: PaymentOrder }>('/api/payments/create-order', { method: 'POST', body: JSON.stringify({ percentages, total }) }),
   captureOrder: (id: string) => request<{ order: PaymentOrder }>(`/api/payments/${id}/capture`, { method: 'POST' }),
-  scanReceipt: (trip: Trip, input: { restaurant?: string; amount?: number; category?: 'food' | 'transport' | 'activity' | 'other'; paidBy?: string; participantIds?: string[] } = {}) => request<{ receipt: { restaurant: string; amount: number }; trip: Trip }>('/api/receipts/analyze', { method: 'POST', body: JSON.stringify({ restaurant: 'Sushi Dai', amount: 120, ...input, trip }) }),
+  scanReceipt: (trip: Trip, input: { restaurant?: string; amount?: number; category?: 'food' | 'transport' | 'activity' | 'other'; paidBy?: string; participantIds?: string[]; splitPercentages?: Record<string, number> } = {}) => request<{ receipt: { restaurant: string; amount: number }; trip: Trip }>('/api/receipts/analyze', { method: 'POST', body: JSON.stringify({ restaurant: 'Sushi Dai', amount: 120, ...input, trip }) }),
   deleteReceipt: (receiptId: string, trip: Trip) => request<{ trip: Trip }>(`/api/receipts/${receiptId}`, { method: 'DELETE', body: JSON.stringify({ trip }) }),
 };

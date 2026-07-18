@@ -12,12 +12,14 @@ import { BookingExperience } from './components/BookingExperience';
 import { GroupPlanningPanel } from './components/GroupPlanningPanel';
 import { TravelDnaPanel } from './components/TravelDnaPanel';
 import { TravelerFitOverview } from './components/TravelerFitOverview';
+import { GoogleDayMap } from './components/GoogleDayMap';
 import { DecisionStudio } from './components/DecisionStudio';
 import { WeatherCard } from './components/WeatherCard';
 import { ExpenseLedger } from './components/ExpenseLedger';
 import { DisruptionDemo } from './components/DisruptionDemo';
 
 type Page = 'home' | 'planner' | 'checkout' | 'live' | 'expenses' | 'dna';
+let voiceActiveDay = 1;
 const isE164Phone = (value: string) => /^\+[1-9]\d{7,14}$/.test(value);
 const toE164Phone = (value?: string) => {
   const digits = value?.replace(/\D/g, '') ?? '';
@@ -26,11 +28,11 @@ const toE164Phone = (value?: string) => {
 
 const nav: { id: Page; label: string; icon: typeof Map }[] = [
   { id: 'home', label: 'Trip dashboard', icon: Map },
-  { id: 'planner', label: 'Plan', icon: Mic },
-  { id: 'checkout', label: 'Booking & payment', icon: CreditCard },
-  { id: 'live', label: 'Live trip', icon: Route },
-  { id: 'expenses', label: 'Expenses & settlement', icon: WalletCards },
-  { id: 'dna', label: 'Travel DNA', icon: Sparkles },
+  { id: 'planner', label: 'Plan together', icon: Mic },
+  { id: 'live', label: 'Live itinerary', icon: Route },
+  { id: 'checkout', label: 'Book & split', icon: CreditCard },
+  { id: 'expenses', label: 'Shared expenses', icon: WalletCards },
+  { id: 'dna', label: 'Travel memory', icon: Sparkles },
 ];
 
 const categoryMeta: Record<ItemCategory, { icon: typeof Landmark; label: string; color: string }> = {
@@ -74,14 +76,14 @@ function DayPills({ trip, activeDay, setActiveDay }: { trip: Trip; activeDay: nu
 function RouteMap({ trip, activeDay, onSelect }: { trip: Trip; activeDay: number; onSelect: (item: ItineraryItem) => void }) {
   const allItems = trip.itinerary.filter((item) => item.day === activeDay);
   const points = allItems.map((item) => `${item.location.x},${item.location.y}`).join(' ');
-  if (import.meta.env.VITE_GOOGLE_MAPS_API_KEY) return <LiveGoogleMap trip={trip} activeDay={activeDay} />;
+  if (import.meta.env.VITE_GOOGLE_MAPS_API_KEY) return <GoogleDayMap trip={trip} activeDay={activeDay} onSelect={onSelect} />;
   return <><div className="paper-grid relative min-h-[360px] overflow-hidden rounded-[28px] border border-[#d9ded8] bg-[#e9f0ec]">
     <div className="absolute -left-10 top-7 h-48 w-72 rotate-[-10deg] rounded-[50%] bg-[#c4d8c8] opacity-65" />
     <div className="absolute -right-16 bottom-0 h-72 w-80 rotate-[20deg] rounded-[45%] bg-[#c6d9c6] opacity-70" />
     <div className="absolute left-[11%] top-[19%] h-[2px] w-[79%] rotate-[12deg] bg-white/70" />
     <div className="absolute left-[3%] top-[66%] h-[2px] w-[86%] rotate-[-21deg] bg-white/70" />
-    <span className="absolute left-5 top-5 rounded-full bg-white/75 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-moss">Japan journey route</span>
-    <span className="absolute bottom-5 left-5 text-xs font-semibold tracking-wide text-moss/70">TOKYO → KYOTO</span>
+    <span className="absolute left-5 top-5 rounded-full bg-white/75 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-moss">{trip.request.destination} journey route</span>
+    <span className="absolute bottom-5 left-5 text-xs font-semibold uppercase tracking-wide text-moss/70">Day {activeDay} · {trip.request.destination}</span>
     <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label={`Optimized itinerary path for day ${activeDay}`}>
       <polyline points={points} fill="none" stroke="#245B4F" strokeWidth="0.7" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="2.2 1.6" className="animate-pulseRoute" />
     </svg>
@@ -585,6 +587,7 @@ function PersistentVoiceAssistant({ trip, page, onTrip }: { trip: Trip; page: Pa
   const tripRef = useRef(trip);
   const onTripRef = useRef(onTrip);
   const appliedBriefRef = useRef('');
+  const handledVoiceReplanRef = useRef('');
   const [showTranscript, setShowTranscript] = useState(false);
   const connected = liveVoice.state === 'connected' || liveVoice.state === 'connecting' || liveVoice.state === 'waiting_for_agent';
   const micEnabled = liveVoice.isMicrophoneEnabled;
@@ -604,7 +607,8 @@ function PersistentVoiceAssistant({ trip, page, onTrip }: { trip: Trip; page: Pa
       friends: trip.travelers.map((friend) => friend.name),
       selectedFlight: trip.flights.find((flight) => flight.selected)?.code,
       selectedHotel: trip.hotels.find((hotel) => hotel.selected)?.name,
-      instruction: 'Use this as the current app context. Give concise help relevant to the current page and do not ask for facts already listed.',
+      activeDay: voiceActiveDay,
+      instruction: 'Use this as the current app context. Give concise help relevant to the current page. On Live itinerary, when the traveler says they are tired, delayed, stuck, facing rain, a closure, or a flight delay, acknowledge it and emit replan_trip with type tired, late, rain, closed, or flight-delay. Do not ask for facts already listed.',
     });
   }, [connected, page, sendAction, trip]);
 
@@ -628,6 +632,37 @@ function PersistentVoiceAssistant({ trip, page, onTrip }: { trip: Trip; page: Pa
       .then((response) => onTripRef.current(response.trip, 'JourneyOS is calling Maya’s simulated friend agent through Vocal Bridge.'))
       .catch((error: Error) => onTripRef.current(tripRef.current, error.message));
   }), [liveVoice, onAction]);
+
+  const applyVoiceReplan = async (type: ReplanType) => {
+    try {
+      const response = await api.replan(type, tripRef.current, voiceActiveDay);
+      onTripRef.current(response.trip, `Day ${voiceActiveDay} was replanned from your live voice update.`);
+    } catch (error) {
+      onTripRef.current(tripRef.current, error instanceof Error ? error.message : 'Could not update the live itinerary.');
+    }
+  };
+
+  useEffect(() => onAction('replan_trip', (payload) => {
+    const requested = typeof payload.type === 'string' ? payload.type.toLowerCase() : '';
+    const type = (['tired', 'late', 'rain', 'closed', 'flight-delay'] as ReplanType[]).find((candidate) => requested.includes(candidate));
+    if (type) void applyVoiceReplan(type);
+  }), [onAction]);
+
+  useEffect(() => {
+    if (page !== 'live') return;
+    const latest = [...transcript].reverse().find((entry) => entry.role === 'user')?.text.trim();
+    if (!latest || handledVoiceReplanRef.current === latest) return;
+    const spoken = latest.toLowerCase();
+    let type: ReplanType | undefined;
+    if (/\b(tired|exhausted|need a break|slow down)\b/.test(spoken)) type = 'tired';
+    else if (/\b(rain|storm|weather)\b/.test(spoken)) type = 'rain';
+    else if (/\b(closed|closure|cancelled attraction)\b/.test(spoken)) type = 'closed';
+    else if (/\bflight\b.*\b(delay|late|cancel)/.test(spoken)) type = 'flight-delay';
+    else if (/\b(delay|delayed|late|stuck|long time|running behind)\b/.test(spoken)) type = 'late';
+    if (!type) return;
+    handledVoiceReplanRef.current = latest;
+    void applyVoiceReplan(type);
+  }, [page, transcript]);
 
   const toggle = async () => {
     try {
@@ -653,6 +688,8 @@ function App() {
   const [activeDay, setActiveDay] = useState(1);
   const [notice, setNotice] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => { voiceActiveDay = activeDay; }, [activeDay]);
 
   useEffect(() => {
     const saved = window.localStorage.getItem('journeyos-active-trip');
@@ -690,7 +727,7 @@ function App() {
   const resetDemo = async () => { try { const response = await api.resetTrip(); setActiveDay(1); onTrip(response.trip, 'Demo reset to the deterministic Japan starting state.'); } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not reset the demo.'); } };
   const scanReceipt = async () => { if (!trip) return; try { const response = await api.scanReceipt(trip); onTrip(response.trip, `${response.receipt.restaurant} receipt scanned — ${money(response.receipt.amount)} added to live spend.`); } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not scan receipt.'); } };
   if (!trip) return <main className="grid min-h-screen place-items-center bg-cream"><div className="text-center"><div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-moss text-white animate-pulse"><Sparkles /></div><p className="mt-4 text-sm font-bold text-ink">Opening your journey…</p></div></main>;
-  const content = page === 'home' ? <><TripOverview trip={trip} setPage={setPage} activeDay={activeDay} setActiveDay={setActiveDay} onReceipt={() => void scanReceipt()} onReset={() => void resetDemo()} />{hasTripBrief && <div className="mt-6"><TravelerFitOverview trip={trip} /></div>}</> : page === 'planner' ? <><VoicePlanner trip={trip} onTrip={onTrip} /><GroupPlanningPanel trip={trip} onTrip={onTrip} /><DecisionStudio trip={trip} onTrip={onTrip} /></> : page === 'checkout' ? <BookingExperience trip={trip} onTrip={onTrip} /> : page === 'live' ? <><MapOptimizationPanel trip={trip} activeDay={activeDay} onTrip={onTrip} /><JourneyMap trip={trip} activeDay={activeDay} setActiveDay={setActiveDay} /><DisruptionDemo trip={trip} activeDay={activeDay} onTrip={onTrip} /></> : page === 'expenses' ? <ExpenseLedger trip={trip} onTrip={onTrip} /> : <TravelDnaPanel trip={trip} />;
+  const content = page === 'home' ? <><TripOverview trip={trip} setPage={setPage} activeDay={activeDay} setActiveDay={setActiveDay} onReceipt={() => void scanReceipt()} onReset={() => void resetDemo()} />{hasTripBrief && <div className="mt-6"><TravelerFitOverview trip={trip} /></div>}</> : page === 'planner' ? <><VoicePlanner trip={trip} onTrip={onTrip} /><GroupPlanningPanel trip={trip} onTrip={onTrip} /><DecisionStudio trip={trip} onTrip={onTrip} /></> : page === 'checkout' ? <BookingExperience trip={trip} onTrip={onTrip} /> : page === 'live' ? <><JourneyMap trip={trip} activeDay={activeDay} setActiveDay={setActiveDay} /><MapOptimizationPanel trip={trip} activeDay={activeDay} onTrip={onTrip} /><DisruptionDemo trip={trip} activeDay={activeDay} onTrip={onTrip} /></> : page === 'expenses' ? <ExpenseLedger trip={trip} onTrip={onTrip} /> : <TravelDnaPanel trip={trip} />;
   return <div className="min-h-screen bg-cream text-ink"><aside className="fixed inset-y-0 left-0 z-40 hidden w-[248px] flex-col border-r border-stone-200 bg-white px-5 py-6 lg:flex"><div className="flex items-center gap-3 px-2"><span className="grid h-10 w-10 place-items-center rounded-2xl bg-ink text-lg font-bold text-white">J</span><div><p className="font-display text-2xl leading-none text-ink">JourneyOS</p><p className="mt-1 text-[10px] font-bold uppercase tracking-[0.16em] text-moss">Travel, arranged.</p></div></div><nav className="mt-10 space-y-1">{nav.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => setPage(id)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold transition ${page === id ? 'bg-[#eff6f1] text-moss' : 'text-stone-500 hover:bg-stone-50 hover:text-ink'}`}><Icon size={18} />{label}</button>)}</nav><div className="mt-auto rounded-2xl bg-ink p-4 text-white"><p className="text-xs font-bold">Your travel DNA is learning.</p><p className="mt-2 text-xs leading-5 text-white/60">Each choice makes the next trip feel more like you.</p><div className="mt-3 flex items-center gap-1.5"><Sparkles size={14} className="text-amber-300" /><span className="text-xs font-bold text-amber-100">Culture-forward</span></div></div></aside><header className="sticky top-0 z-30 border-b border-stone-200 bg-cream/90 px-5 py-4 backdrop-blur lg:ml-[248px] lg:px-9"><div className="mx-auto flex max-w-[1400px] items-center justify-between"><div className="flex items-center gap-3"><button onClick={() => setMenuOpen(!menuOpen)} className="grid h-9 w-9 place-items-center rounded-xl bg-white text-ink ring-1 ring-stone-200 lg:hidden"><Map size={17} /></button><div><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-stone-400">{hasTripBrief ? trip.dates : 'Trip brief needed'}</p><h2 className="text-sm font-bold text-ink">{title}</h2></div></div><div className="flex items-center gap-2"><span className="hidden rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-stone-500 ring-1 ring-stone-200 sm:inline-flex">{hasTripBrief ? `${trip.travelers.length} friends` : 'No friends added yet'}</span><span className="grid h-9 w-9 place-items-center rounded-full bg-coral text-xs font-bold text-white">AY</span></div></div>{menuOpen && <div className="mx-auto mt-4 max-w-[1400px] rounded-2xl bg-white p-2 shadow-lg ring-1 ring-stone-200 lg:hidden">{nav.map(({ id, label, icon: Icon }) => <button onClick={() => { setPage(id); setMenuOpen(false); }} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold ${page === id ? 'bg-[#eff6f1] text-moss' : 'text-stone-600'}`} key={id}><Icon size={17} />{label}</button>)}</div>}</header><main className="px-5 py-7 lg:ml-[248px] lg:px-9"><div className="mx-auto max-w-[1400px]">{content}</div></main><PersistentVoiceAssistant trip={trip} page={page} onTrip={onTrip} /><MayaCallConversation trip={trip} onTrip={onTrip} />{notice && <div className="fixed bottom-24 right-5 z-50 max-w-sm rounded-2xl bg-ink px-4 py-3 text-sm font-semibold text-white shadow-2xl"><div className="flex items-start gap-2"><CheckCircle2 className="mt-0.5 shrink-0 text-[#8fe0b7]" size={17} /><span>{notice}</span></div></div>}</div>;
 }
 
