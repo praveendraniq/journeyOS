@@ -39,7 +39,7 @@ Current Git publication:
 
 - Working branch: `agent/live-trip-planning`
 - User fork: `praveendraniq/journeyOS`
-- The partner branch `hemalekamohanram/journeyOS:codex/journeyos-demo-ready` was inspected separately on July 18, 2026 and was not merged into this publication. Its negotiation, page-aware voice, Maps JavaScript, booking-bundle, and expense-split work requires a deliberate reconciliation with the current voice-brief, Vocal Bridge, map-routing, friend-validation, and Sabre changes.
+- The partner branch `hemalekamohanram/journeyOS:codex/journeyos-demo-ready` was inspected and selectively reconciled on July 18, 2026. The current tree includes its dynamic negotiation concept, page-aware Live Trip voice commands, and Maps JavaScript route rendering while preserving the newer structured voice brief, explicit `server/.env` loading, friend validation/callbacks, selected-hotel map anchoring, and Sabre authentication behavior.
 
 ## Local development
 
@@ -128,6 +128,14 @@ The saved Vocal Bridge HTTP Custom API tools are:
 
 - `get_trip_context`
 - `save_friend_preferences`
+
+The optional live negotiator additionally posts its explicit yes/no result to:
+
+```text
+POST /api/negotiation-calls/complete
+```
+
+The callback uses the same `X-JourneyOS-Context-Key` secret. The itinerary remains unchanged until the admin applies an accepted agreement in the planner.
 
 `save_friend_preferences` must be called as a saved HTTP Custom API tool through Background AI. It must not be sent through `trigger_client_action`.
 
@@ -226,6 +234,7 @@ Important context:
 - OAuth/access tokens remain server-side.
 - The Sabre skills-based MCP endpoint is configured through server environment variables.
 - Live results must be clearly distinguished from demo inventory.
+- Sabre MCP flight search sends the requested adult count, and the hackathon international flow searches hotel inventory from the destination-arrival day rather than the home-departure day.
 - Booking must preserve selected offer identifiers and require explicit admin confirmation.
 - No booking or payment is represented as complete without a successful backend response.
 
@@ -234,10 +243,12 @@ Important context:
 - The browser map uses `VITE_GOOGLE_MAPS_API_KEY`.
 - Google Places and route planning use server-side keys.
 - Billing and the required APIs must be enabled in the same Google Cloud project.
+- The July 18 browser validation showed that the current client key can load Maps JavaScript and Embed, but its Geocoding service is not enabled. The app falls back to the embedded day route; enable Geocoding API for numbered JavaScript markers and the rendered polyline.
 - Live itineraries should use group preferences to select stops.
 - Each day should start and end at the hotel chosen on the booking page.
 - Routes should include breakfast, lunch, and dinner where appropriate and optimize the complete return-to-hotel route.
 - Google map routes use complete Places postal addresses directly, use the selected hotel location as the daily route anchor, and remount the embed when the selected day changes. This prevents unresolved demo hotel names from falling back to a world map.
+- When the Maps JavaScript API is available, Live Trip geocodes the active day, shows numbered markers, draws the day route, and falls back to a Google Embed route if JavaScript map loading or geocoding fails.
 
 ## UX decisions
 
@@ -247,12 +258,21 @@ Important context:
 - Keep the dynamic travel-brief fixes.
 - Keep the agent network concept, but do not expose a redundant standalone agent screen.
 - Voice should feel continuous across pages while maintaining confirmed context.
-- The Plan screen contains the voice brief and friend roster.
+- On Live Trip, `itinerary_command` applies start, complete, restore, skip, cancel, or delay requests only to the active day; `show_day`, `navigate`, and `replan_trip` preserve the same voice session and confirmed trip context.
+- The Plan screen contains the voice brief and the single AI Travel Negotiator flow: known group context, one consented friend call, live/scripted transcript, admin preview, and Decision Studio. The older redundant Friends & preference calls block is intentionally removed.
+- Decision Studio always shows Admin priority adjustment and Projected plan. Friend-call result cards appear when results exist; applying the adjusted plan remains disabled until friend input has been collected.
+- Live itinerary and dashboard timelines show Mark as done for experience/food stops and Undo done after completion; completion is persisted through the existing itinerary progress API.
+- Live voice commands are page-aware and constrained to the selected day. The app handles Vocal Bridge itinerary/replan actions and also applies a user transcript command directly when the agent fails to emit the action. Skipped stops expose Restore stop, and completed stops expose Undo done.
+- Negotiation outbound calls automatically switch to the labeled scripted flow when Vocal Bridge credentials, CLI execution, or outbound quota are unavailable; disruption controls remain connected to the active-day replan API.
+- Live itinerary layout order is: journey map and timeline, Live activity progress, disruption controls, then the Why this order works before/optimised comparison at the bottom.
 - Booking and payment should remain minimal and voice-driven.
 - Live Trip should show real preference-aware daily stops and mapped directions.
 - Day 1 is selected whenever a newly accepted trip brief creates an itinerary.
 - Avoid redundant cards and repeated trip information.
 - Branding near the voice control should say “Powered by Vocal Bridge.”
+- The partner Dashboard and package-style Booking screen are preserved. The sidebar order and labels are: Trip dashboard, Plan together, Live itinerary, Book & split, Shared expenses, and Travel memory.
+- The Dashboard uses the partner’s full Group Vibe panel: overall mood and group fit, fairness gap, per-traveler would-love/keep-light priorities, call status or plan-fit explanation, and the current fair-trade summary. It remains driven by live traveler and preference-call state.
+- Package cards use the spoken destination name when the demo store does not know an IATA code; they never display a fabricated `DST` airport code. Sabre CERT search still requires a real three-letter code or a supported city-to-airport resolution.
 
 ## Current validation status
 
@@ -260,7 +280,7 @@ At the time this handoff was written:
 
 ```text
 npm run build  — passed
-npm test       — 20 tests passed
+npm test       — 22 tests passed
 ```
 
 The test suite includes regression coverage for:
@@ -272,6 +292,8 @@ The test suite includes regression coverage for:
 - Trip date and traveler reconciliation
 - Deterministic itinerary and group-happiness behavior
 - Expense settlement and receipt reversal
+- Negotiation preview remaining unchanged until explicit admin approval
+- Page-aware itinerary voice commands targeting only the selected day
 
 ## Important testing flow
 

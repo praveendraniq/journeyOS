@@ -11,12 +11,48 @@
   },
   {
     "name": "trip_brief_ready",
-    "description": "Place a finalized spoken trip request into the JourneyOS editable trip brief. Payload field: conversation.",
+    "description": "Save the complete admin brief. Send conversation, origin, destination, departureDate, returnDate, travelers, budget, interests, foodPreferences, and travelStyle.",
+    "direction": "agent_to_app"
+  },
+  {
+    "name": "collect_maya_preferences",
+    "description": "End the browser conversation and start the configured simulated-traveler preference call.",
+    "direction": "agent_to_app"
+  },
+  {
+    "name": "itinerary_command",
+    "description": "Change only the active Live Trip day. Send the traveler’s exact start, complete, restore, skip, cancel, or delay request in query.",
+    "direction": "agent_to_app"
+  },
+  {
+    "name": "replan_trip",
+    "description": "Replan the active day for late, rain, flight-delay, closed, or tired. Send the value in type.",
+    "direction": "agent_to_app"
+  },
+  {
+    "name": "confirm_change",
+    "description": "Confirm and apply the proposed active-day flight-delay recovery after the traveler explicitly agrees.",
+    "direction": "agent_to_app"
+  },
+  {
+    "name": "navigate",
+    "description": "Open a JourneyOS page. Send page as home, planner, checkout, live, expenses, or dna.",
+    "direction": "agent_to_app"
+  },
+  {
+    "name": "show_day",
+    "description": "Open a numbered itinerary day on Live Trip. Send the integer in day.",
     "direction": "agent_to_app"
   },
   {
     "name": "trip_plan_created",
     "description": "Notify the voice agent that JourneyOS structured and saved the trip brief.",
+    "direction": "app_to_agent",
+    "behavior": "notify"
+  },
+  {
+    "name": "journeyos_context",
+    "description": "Supplies current page, confirmed trip, selected booking, friends, and active itinerary day. Treat it as authoritative and do not restart planning.",
     "direction": "app_to_agent",
     "behavior": "notify"
   }
