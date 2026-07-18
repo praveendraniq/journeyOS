@@ -23,7 +23,7 @@ export class SabreMcpService {
         { departureLocation: { cityCode: input.origin }, arrivalLocation: { cityCode: input.destination }, departureDate: input.departureDate },
         { departureLocation: { cityCode: input.destination }, arrivalLocation: { cityCode: input.origin }, departureDate: input.returnDate },
       ],
-      travelers: [{ passengerTypeCode: 'ADT' }],
+      travelers: Array.from({ length: input.adults }, () => ({ passengerTypeCode: 'ADT' })),
       sources: { distributionModels: ['ATPCO'] },
       processingOptions: { pseudoCityCode: config.sabre.pcc, limitNumberOfOffers: 5 },
       conversationId,
@@ -36,7 +36,9 @@ export class SabreMcpService {
     const hotels = await this.tool('search-hotels', {
       referencePoint: { type: 'Airport', value: input.destination },
       radiusInMiles: 15,
-      checkInDate: input.departureDate,
+      // The hackathon itinerary models international arrival on the following
+      // local calendar day. Keep hotel nights aligned with destination arrival.
+      checkInDate: this.addDays(input.departureDate, 1),
       checkOutDate: input.returnDate,
       numberOfAdults: input.adults,
       maxResults: 5,
@@ -95,5 +97,11 @@ export class SabreMcpService {
     const response = value as JsonRpcResponse & { content?: Array<{ text?: string }> };
     const content = response.result?.content ?? response.content;
     return content?.map((item) => item.text ?? '').join('\n') ?? '';
+  }
+
+  private addDays(value: string, days: number): string {
+    const date = new Date(`${value}T12:00:00Z`);
+    date.setUTCDate(date.getUTCDate() + days);
+    return date.toISOString().slice(0, 10);
   }
 }

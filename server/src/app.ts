@@ -49,12 +49,23 @@ const preferenceCallCallbackSchema = z.object({
 });
 const preferenceDecisionSchema = z.object({ interestScores: z.record(z.string(), z.number().min(1).max(5)), trip: z.unknown().optional() });
 const simulatedInterviewSchema = z.object({ trip: z.unknown().optional() });
+const negotiationStartSchema = z.object({ travelerId: z.string().min(1), trip: z.unknown().optional() });
+const negotiationDialogueSchema = z.array(z.object({ speaker: z.enum(['agent', 'traveler']), text: z.string().min(1).max(1000) })).max(20);
+const negotiationChangeSchema = z.object({ time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), title: z.string().min(2).max(120), subtitle: z.string().min(2).max(180), category: z.enum(['food', 'experience']) });
+const negotiationCallbackSchema = z.object({
+  travelerId: z.string().min(1), accepted: z.union([z.boolean(), z.enum(['true', 'false'])]).transform((value) => value === true || value === 'true'),
+  travelerResponse: z.string().min(1).max(1000), statedPreference: z.string().min(1).max(500).optional(), counterpartId: z.string().min(1).max(120).optional(),
+  conflict: z.string().min(4).max(800).optional(), rationale: z.string().min(4).max(1000).optional(), proposal: z.string().min(4).max(800).optional(),
+  affectedDay: z.coerce.number().int().min(1).max(14).optional(), agreedChanges: z.array(z.string().min(2).max(200)).max(6).optional(),
+  itineraryChanges: z.array(negotiationChangeSchema).min(1).max(4).optional(), dialogue: negotiationDialogueSchema.optional(),
+});
 const selectionSchema = z.object({ id: z.string().min(1), trip: z.unknown().optional() });
-const progressSchema = z.object({ id: z.string().min(1).optional(), action: z.enum(['start', 'complete', 'skip', 'delay']), actualDurationMins: z.number().int().min(1).max(720).optional(), minutes: z.number().int().min(1).max(240).optional(), trip: z.unknown().optional() });
+const progressSchema = z.object({ id: z.string().min(1).optional(), action: z.enum(['start', 'complete', 'skip', 'restore', 'delay']), actualDurationMins: z.number().int().min(1).max(720).optional(), minutes: z.number().int().min(1).max(240).optional(), trip: z.unknown().optional() });
+const itineraryCommandSchema = z.object({ query: z.string().min(2).max(500), activeDay: z.number().int().min(1).max(14), trip: z.unknown().optional() });
 const travelerSchema = z.object({ action: z.enum(['add', 'update', 'remove']), id: z.string().min(1).optional(), name: z.string().min(2).max(60).optional(), phone: z.string().max(30).optional(), budgetPreference: z.enum(['value', 'balanced', 'premium']).optional(), activityLevel: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]).optional(), pacePreference: z.enum(['easy', 'balanced', 'full']).optional(), foodPreference: z.string().min(2).max(100).optional(), interests: z.object({ culture: z.number().min(1).max(5), history: z.number().min(1).max(5), food: z.number().min(1).max(5), photography: z.number().min(1).max(5), shopping: z.number().min(1).max(5), nightlife: z.number().min(1).max(5), nature: z.number().min(1).max(5) }).optional(), trip: z.unknown().optional() });
 const tripDetailsSchema = z.object({ origin: z.string().min(2).max(80), destination: z.string().min(2).max(80), departureDate: z.string().date(), returnDate: z.string().date(), trip: z.unknown().optional() });
 const receiptSchema = z.object({ amount: z.number().positive().optional(), restaurant: z.string().min(1).optional(), fileName: z.string().optional(), category: z.enum(['food', 'transport', 'activity', 'other']).optional(), paidBy: z.string().optional(), participantIds: z.array(z.string()).optional(), trip: z.unknown().optional() });
-const orderSchema = z.object({ percentages: z.record(z.string(), z.number().min(0).max(100)).optional() }).superRefine((value, ctx) => { if (value.percentages && Math.abs(Object.values(value.percentages).reduce((sum, item) => sum + item, 0) - 100) > 0.01) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Custom split must total 100%' }); });
+const orderSchema = z.object({ percentages: z.record(z.string(), z.number().min(0).max(100)).optional(), total: z.number().positive().optional() }).superRefine((value, ctx) => { if (value.percentages && Math.abs(Object.values(value.percentages).reduce((sum, item) => sum + item, 0) - 100) > 0.01) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Custom split must total 100%' }); });
 const weatherSchema = z.object({ destination: z.string().min(2).max(80) });
 const voiceTokenSchema = z.object({ participant_name: z.string().min(1).max(80).optional() });
 const sabreSearchSchema = z.object({ origin: z.string().trim().length(3).toUpperCase(), destination: z.string().trim().length(3).toUpperCase(), departureDate: z.string().date(), returnDate: z.string().date(), adults: z.number().int().min(1).max(9) });
@@ -115,6 +126,7 @@ export const createApp = () => {
     const suppliedSecret = req.header('X-JourneyOS-Context-Key');
     if (!config.vocalBridge.outboundContextSecret || suppliedSecret !== config.vocalBridge.outboundContextSecret) return res.status(401).json({ error: 'Unauthorized trip context request.' });
     const trip = store.getTrip();
+    const agreement = trip.preferenceCollection?.agreement;
     res.json({
       admin: trip.travelers[0]?.name ?? 'Trip admin',
       trip: {
@@ -123,13 +135,15 @@ export const createApp = () => {
         departureDate: trip.request.departureDate,
         returnDate: trip.request.returnDate,
         duration: trip.request.duration,
-        travelers: trip.travelers.map(({ id, name, pacePreference, foodPreference }) => ({ id, name, pacePreference, foodPreference })),
+        travelers: trip.travelers.map(({ id, name, pacePreference, foodPreference, interests }) => ({ id, name, pacePreference, foodPreference, interests })),
         budget: trip.request.budget,
         travelStyle: trip.request.travelStyle,
         interests: trip.request.interests,
         foodPreferences: trip.request.foodPreferences,
       },
-      instruction: 'Use this as established context. Do not ask the callee to repeat these facts, and do not repeat each answer back. Ask only one must-do, food or avoid needs, and easy/balanced/active pace. Confirm the collected preferences once at the end, save the result, say one short goodbye, and immediately end_call. Target 45 seconds, but finish the current exchange gracefully rather than cutting off audio.',
+      negotiationSession: agreement ? { travelerId: agreement.travelerId, travelerName: agreement.travelerName, affectedDayHint: agreement.affectedDay } : undefined,
+      knownProfiles: trip.preferenceCollection?.calls.filter((call) => call.status === 'completed').map((call) => ({ travelerId: call.travelerId, name: call.name, topPriorities: call.topPriorities, summary: call.summary })) ?? [],
+      instruction: agreement ? `Ask ${agreement.travelerName} for one priority or constraint, compare it with the saved profiles, propose one fair trade, request an explicit yes or no, and submit it to the negotiation callback.` : 'Use this established trip context. Ask only one must-do, food or avoid needs, and pace. Save once, say goodbye, and end the call.',
     });
   });
   app.post('/api/preference-calls/complete', (req, res, next) => {
@@ -218,6 +232,32 @@ export const createApp = () => {
       res.json({ collection, trip });
     } catch (error) { next(error); }
   });
+  app.post('/api/planner/negotiation/start', async (req, res, next) => {
+    try {
+      const input = negotiationStartSchema.parse(req.body);
+      if (input.trip) store.hydrate(input.trip as ReturnType<typeof store.getTrip>);
+      const traveler = store.getTrip().travelers.find((item) => item.id === input.travelerId);
+      if (!traveler) throw new Error('That traveler is not part of this trip.');
+      const live = !config.mockMode && Boolean(config.vocalBridge.apiKey && config.vocalBridge.agentId && config.vocalBridge.outboundContextSecret);
+      store.startNegotiation(input.travelerId, live ? 'vocal-bridge' : 'mock');
+      if (live) {
+        try { await planner.callNegotiation(traveler); }
+        catch (error) { console.warn('Live negotiation unavailable; using the scripted fallback.', error); store.startNegotiation(input.travelerId, 'mock'); return res.json({ trip: store.getTrip(), mode: 'scripted' as const }); }
+      }
+      res.json({ trip: store.getTrip(), mode: live ? 'live' as const : 'scripted' as const });
+    } catch (error) { next(error); }
+  });
+  app.post('/api/planner/negotiation/simulate', (req, res, next) => {
+    try {
+      const { trip } = simulatedInterviewSchema.parse(req.body); if (trip) store.hydrate(trip as ReturnType<typeof store.getTrip>);
+      const agreement = store.getTrip().preferenceCollection?.agreement; if (!agreement) throw new Error('Start the negotiation first.');
+      res.json({ trip: store.completeNegotiation({ travelerId: agreement.travelerId, accepted: true, statedPreference: 'a memorable local experience', travelerResponse: 'Yes, that works for me.' }) });
+    } catch (error) { next(error); }
+  });
+  app.post('/api/planner/negotiation/apply', (req, res, next) => {
+    try { const { trip } = simulatedInterviewSchema.parse(req.body); if (trip) store.hydrate(trip as ReturnType<typeof store.getTrip>); res.json({ trip: store.applyNegotiation() }); }
+    catch (error) { next(error); }
+  });
   app.post('/api/planner/approve-preferences', (req, res, next) => {
     try { const input = preferenceDecisionSchema.parse(req.body); if (input.trip) store.hydrate(input.trip as ReturnType<typeof store.getTrip>); res.json({ trip: store.applyPreferenceDecision(input.interestScores as ReturnType<typeof store.getTrip>['groupPreference']['interestScores']) }); }
     catch (error) { next(error); }
@@ -276,9 +316,22 @@ export const createApp = () => {
       if (!input.id) return res.status(400).json({ error: 'An itinerary stop is required.' });
       if (input.action === 'start') return res.json({ trip: store.startStop(input.id) });
       if (input.action === 'skip') return res.json({ trip: store.skipStop(input.id) });
+      if (input.action === 'restore') return res.json({ trip: store.restoreStop(input.id) });
       return res.json({ trip: store.completeStop(input.id, input.actualDurationMins) });
     }
     catch (error) { next(error); }
+  });
+  app.post('/api/itinerary/command', (req, res, next) => {
+    try { const input = itineraryCommandSchema.parse(req.body); if (input.trip) store.hydrate(input.trip as ReturnType<typeof store.getTrip>); res.json(store.applyItineraryCommand(input.query, input.activeDay)); }
+    catch (error) { next(error); }
+  });
+  app.post('/api/negotiation-calls/complete', (req, res, next) => {
+    try {
+      const suppliedSecret = req.header('X-JourneyOS-Context-Key');
+      if (!config.vocalBridge.outboundContextSecret || suppliedSecret !== config.vocalBridge.outboundContextSecret) return res.status(401).json({ error: 'Unauthorized negotiation callback.' });
+      const source = req.body && Object.keys(req.body).length ? req.body : req.query;
+      res.json({ trip: store.completeNegotiation(negotiationCallbackSchema.parse(source)) });
+    } catch (error) { next(error); }
   });
 
   app.post('/api/itinerary/optimize', (_req, res) => {
@@ -298,8 +351,8 @@ export const createApp = () => {
   app.post('/api/payments/create-order', async (req, res, next) => {
     try {
       const trip = store.getTrip();
-      const { percentages } = orderSchema.parse(req.body ?? {});
-      const order = await payments.createOrder(knownBookingTotal(trip), trip.travelers, percentages);
+      const { percentages, total } = orderSchema.parse(req.body ?? {});
+      const order = await payments.createOrder(total ?? knownBookingTotal(trip), trip.travelers, percentages);
       orders.set(order.id, order);
       res.json({ order });
     } catch (error) { next(error); }
