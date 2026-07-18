@@ -54,7 +54,7 @@ test('skip and deterministic reset restore a reproducible demo', () => {
   assert.equal(store.skipStop(stop.id).itinerary.find((item) => item.id === stop.id)?.status, 'skipped');
   const reset = store.reset();
   assert.equal(reset.id, 'trip-japan-2026');
-  assert.equal(reset.request.destination, 'Japan');
+  assert.equal(reset.request.destination, 'Tokyo');
   assert.equal(reset.schemaVersion, 2);
 });
 
@@ -125,4 +125,30 @@ test('applies generated-trip disruptions to the active day', () => {
   const changed = updated.itinerary.find((item) => item.day === 2 && item.status === 'moved');
   assert.ok(changed);
   assert.match(changed.title, /Indoor cultural alternative/);
+});
+
+test('negotiates a live priority without changing the itinerary before admin approval', () => {
+  const store = new DemoStore();
+  const friend = store.getTrip().travelers[1];
+  const beforeCount = store.getTrip().itinerary.length;
+  const started = store.startNegotiation(friend.id, 'mock');
+  assert.equal(started.preferenceCollection?.agreement?.status, 'calling');
+  assert.equal(started.itinerary.length, beforeCount);
+  const agreed = store.completeNegotiation({ travelerId: friend.id, accepted: true, statedPreference: 'anime shopping', travelerResponse: 'Yes, that balance works.' });
+  assert.equal(agreed.preferenceCollection?.agreement?.status, 'accepted');
+  assert.equal(agreed.itinerary.length, beforeCount);
+  const applied = store.applyNegotiation();
+  assert.equal(applied.preferenceCollection?.agreement?.status, 'applied');
+  assert.ok(applied.itinerary.length > beforeCount);
+});
+
+test('applies page-aware voice commands only to the selected itinerary day', () => {
+  const store = new DemoStore();
+  const target = store.getTrip().itinerary.find((item) => item.day === 2);
+  assert.ok(target);
+  const result = store.applyItineraryCommand('mark stop 1 complete', 2);
+  assert.equal(result.affectedStopIds[0], target.id);
+  assert.equal(result.trip.itinerary.find((item) => item.id === target.id)?.status, 'completed');
+  const restored = store.applyItineraryCommand('undo stop 1', 2);
+  assert.equal(restored.trip.itinerary.find((item) => item.id === target.id)?.status, 'upcoming');
 });
