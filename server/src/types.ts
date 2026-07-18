@@ -124,7 +124,7 @@ export interface TravelDnaChange {
 
 export interface TripEvent {
   id: string;
-  type: 'late' | 'rain' | 'flight-delay' | 'closed' | 'tired' | 'end-day';
+  type: 'late' | 'rain' | 'flight-delay' | 'closed' | 'tired';
   title: string;
   createdAt: string;
   explanation: string;

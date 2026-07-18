@@ -28,7 +28,12 @@
   },
   {
     "name": "replan_trip",
-    "description": "Update the active itinerary day after a live disruption. Payload type is end-day, tired, late, rain, closed, or flight-delay.",
+    "description": "Re-optimize the active itinerary day for a broad disruption. Payload type is tired, late, rain, closed, or flight-delay.",
+    "direction": "agent_to_app"
+  },
+  {
+    "name": "itinerary_command",
+    "description": "Apply the traveler’s exact change to the currently selected itinerary day. Send the verbatim request in payload field query; the app resolves targets and supports complete, undo, start, skip, cancel, and delay.",
     "direction": "agent_to_app"
   },
   {

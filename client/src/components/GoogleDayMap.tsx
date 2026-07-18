@@ -53,8 +53,16 @@ export function GoogleDayMap({ trip, activeDay, onSelect }: { trip: Trip; active
 
   useEffect(() => {
     let canceled = false;
+    let settled = false;
     setStatus('loading');
     setUseEmbedFallback(false);
+    const fallbackTimer = window.setTimeout(() => {
+      if (canceled || settled) return;
+      settled = true;
+      setUseEmbedFallback(true);
+      setStatus('ready');
+      setRouteSummary(`${stops.length} planned stops · interactive markers unavailable, showing the Google route preview`);
+    }, 5000);
     void loadMaps(key).then(async ({ maps }) => {
       if (canceled || !container.current) return;
       const map = new maps.Map(container.current, { center: { lat: 0, lng: 0 }, zoom: 2, mapTypeControl: false, streetViewControl: false, fullscreenControl: true });
@@ -68,7 +76,16 @@ export function GoogleDayMap({ trip, activeDay, onSelect }: { trip: Trip; active
       const geocoder = new maps.Geocoder();
       const geocode = (address: string) => new Promise<any | null>((resolve) => geocoder.geocode({ address }, (results: any[], resultStatus: string) => resolve(resultStatus === 'OK' && results?.[0]?.geometry?.location ? results[0].geometry.location : null)));
       const located = (await Promise.all(stops.map(async (stop) => ({ stop, location: await geocode(locationFor(stop, trip.request.destination)) })))).filter((entry) => entry.location);
-      if (canceled || !located.length) {
+      if (canceled || settled) return;
+      if (!located.length) {
+        settled = true;
+        window.clearTimeout(fallbackTimer);
+        setUseEmbedFallback(true);
+        setStatus('ready');
+        setRouteSummary(`${stops.length} planned stops · showing the Google route preview`);
+        return;
+      }
+      if (canceled) {
         setStatus('error');
         setRouteSummary('Google could not place these stops. Open the full route instead.');
         return;
@@ -106,14 +123,19 @@ export function GoogleDayMap({ trip, activeDay, onSelect }: { trip: Trip; active
           setRouteSummary(`${located.length} mapped stops · ${distance.toFixed(1)} km · about ${minutes} min driving`);
         });
       } else setRouteSummary('1 mapped stop');
+      settled = true;
+      window.clearTimeout(fallbackTimer);
       setStatus('ready');
     }).catch(() => {
-      if (!canceled) {
-        setStatus('error');
-        setRouteSummary('Google Maps is unavailable. Use the full-route link below.');
+      if (!canceled && !settled) {
+        settled = true;
+        window.clearTimeout(fallbackTimer);
+        setUseEmbedFallback(true);
+        setStatus('ready');
+        setRouteSummary(`${stops.length} planned stops · showing the Google route preview`);
       }
     });
-    return () => { canceled = true; };
+    return () => { canceled = true; window.clearTimeout(fallbackTimer); };
   }, [activeDay, key, onSelect, stops, trip.request.destination]);
 
   const mapsUrl = `https://www.google.com/maps/dir/${stops.map((stop) => encodeURIComponent(locationFor(stop, trip.request.destination))).join('/')}`;

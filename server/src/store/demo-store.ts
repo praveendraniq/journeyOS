@@ -298,6 +298,7 @@ export class DemoStore {
   startStop(id: string): Trip {
     const stop = this.trip.itinerary.find((item) => item.id === id);
     if (!stop) throw new Error('That itinerary stop no longer exists.');
+    if (stop.status === 'in-progress') return this.getTrip();
     if (stop.status === 'completed' || stop.status === 'skipped') throw new Error('That stop is already finished.');
     this.trip.itinerary.forEach((item) => { if (item.status === 'in-progress') item.status = 'upcoming'; });
     stop.status = 'in-progress';
@@ -311,6 +312,7 @@ export class DemoStore {
   completeStop(id: string, actualDurationMins?: number): Trip {
     const stop = this.trip.itinerary.find((item) => item.id === id);
     if (!stop) throw new Error('That itinerary stop no longer exists.');
+    if (stop.status === 'completed') return this.getTrip();
     stop.status = 'completed';
     stop.completedAt = new Date().toISOString();
     stop.actualDurationMins = actualDurationMins ?? stop.durationMins;
@@ -336,6 +338,7 @@ export class DemoStore {
   skipStop(id: string): Trip {
     const stop = this.trip.itinerary.find((item) => item.id === id);
     if (!stop) throw new Error('That itinerary stop no longer exists.');
+    if (stop.status === 'skipped') return this.getTrip();
     stop.status = 'skipped';
     this.ensureProgress().activeStopId = undefined;
     this.recordProgressEvent(`${stop.title} skipped`, 'JourneyOS removed the stop from progress and preserved the remaining route.');
@@ -429,6 +432,65 @@ export class DemoStore {
       ? `${completed} traveler preference${completed === 1 ? '' : 's'} collected. JourneyOS has refreshed group fit and the compromise route.`
       : 'No preference calls have completed yet.';
     return this.getTrip();
+  }
+
+  restoreStop(id: string): Trip {
+    const stop = this.trip.itinerary.find((item) => item.id === id);
+    if (!stop) throw new Error('That itinerary stop no longer exists.');
+    if (stop.status === 'upcoming' && !stop.completedAt && !stop.startedAt) return this.getTrip();
+    const progress = this.ensureProgress();
+    if (progress.activeStopId === stop.id) progress.activeStopId = undefined;
+    if (typeof stop.varianceMins === 'number') progress.scheduleVarianceMins -= stop.varianceMins;
+    stop.status = 'upcoming';
+    delete stop.startedAt;
+    delete stop.completedAt;
+    delete stop.actualDurationMins;
+    delete stop.varianceMins;
+    this.recordProgressEvent(`${stop.title} restored`, 'The stop is active again and can be completed, skipped, or changed by voice.');
+    this.updateProgress();
+    return this.getTrip();
+  }
+
+  applyItineraryCommand(query: string, activeDay: number): { trip: Trip; message: string; affectedStopIds: string[] } {
+    const spoken = query.toLowerCase().trim();
+    const dayItems = this.trip.itinerary.filter((item) => item.day === activeDay).sort((a, b) => a.time.localeCompare(b.time));
+    if (!dayItems.length) throw new Error(`Day ${activeDay} has no itinerary stops.`);
+
+    const ordinal = spoken.match(/(?:place|stop|activity|item)\s*(\d+)/i)?.[1];
+    const targetWords = spoken.split(/[^a-z0-9]+/).filter((word) => word.length > 3 && !['mark', 'complete', 'completed', 'cancel', 'remove', 'restore', 'undo', 'activity', 'place', 'stop', 'today', 'evening', 'morning', 'afternoon'].includes(word));
+    const unfinished = dayItems.filter((item) => !['completed', 'skipped'].includes(item.status));
+    let targets = ordinal ? dayItems.slice(Math.max(0, Number(ordinal) - 1), Number(ordinal)) : [];
+    if (!targets.length && /\b(evening|tonight)\b/.test(spoken)) targets = dayItems.filter((item) => Number(item.time.slice(0, 2)) >= 17 && !['stay', 'transport'].includes(item.category));
+    if (!targets.length && /\b(morning)\b/.test(spoken)) targets = dayItems.filter((item) => Number(item.time.slice(0, 2)) < 12 && !['stay', 'transport'].includes(item.category));
+    if (!targets.length && /\b(afternoon)\b/.test(spoken)) targets = dayItems.filter((item) => { const hour = Number(item.time.slice(0, 2)); return hour >= 12 && hour < 17 && !['stay', 'transport'].includes(item.category); });
+    if (!targets.length && /\b(rest|remaining)\b/.test(spoken)) targets = unfinished.filter((item) => !['stay', 'transport'].includes(item.category));
+    if (!targets.length && targetWords.length) {
+      const scored = dayItems.map((item) => ({ item, score: targetWords.filter((word) => `${item.title} ${item.subtitle}`.toLowerCase().includes(word)).length })).sort((a, b) => b.score - a.score);
+      if (scored[0]?.score) targets = [scored[0].item];
+    }
+    if (!targets.length) targets = [this.trip.itinerary.find((item) => item.id === this.ensureProgress().activeStopId && item.day === activeDay) ?? unfinished[0] ?? dayItems[0]];
+
+    let action: 'complete' | 'restore' | 'start' | 'skip' | 'delay';
+    if (/\b(undo|restore|reopen|not done|uncomplete)\b/.test(spoken)) action = 'restore';
+    else if (/\b(saw|visited|done|finished|complete|completed)\b/.test(spoken)) action = 'complete';
+    else if (/\b(start|begin|arrived|here now)\b/.test(spoken)) action = 'start';
+    else if (/\b(cancel|skip|remove|drop)\b/.test(spoken)) action = 'skip';
+    else if (/\b(late|delay|delayed|behind|stuck)\b/.test(spoken)) action = 'delay';
+    else throw new Error('Say what to change, for example “mark place 2 complete”, “undo place 2”, or “cancel the evening activity”.');
+
+    if (action === 'delay') {
+      const minutes = Math.min(240, Math.max(1, Number(spoken.match(/(\d+)\s*(?:minute|min)/)?.[1] ?? 30)));
+      const trip = this.reportDelay(minutes);
+      return { trip, message: `Day ${activeDay} is updated for a ${minutes}-minute delay.`, affectedStopIds: targets.map((item) => item.id) };
+    }
+    for (const target of targets) {
+      if (action === 'complete') this.completeStop(target.id);
+      else if (action === 'restore') this.restoreStop(target.id);
+      else if (action === 'start') this.startStop(target.id);
+      else this.skipStop(target.id);
+    }
+    const verb = action === 'complete' ? 'completed' : action === 'restore' ? 'restored' : action === 'start' ? 'started' : 'removed from today';
+    return { trip: this.getTrip(), message: `${targets.map((item) => item.title).join(', ')} ${verb}.`, affectedStopIds: targets.map((item) => item.id) };
   }
 
   completeSimulatedPrabhuInterview(): Trip {
@@ -558,18 +620,10 @@ export class DemoStore {
   }
 
   replan(type: TripEvent['type'], activeDay?: number): Trip {
-    if (type === 'end-day') {
-      const day = activeDay ?? 1;
-      const cancelled = this.trip.itinerary.filter((item) => item.day === day && ['upcoming', 'moved'].includes(item.status) && !['stay', 'transport'].includes(item.category));
-      for (const item of cancelled) item.status = 'skipped';
-      this.trip.events.unshift({ id: `event-${Date.now()}`, type, title: `Day ${day} ended early`, createdAt: new Date().toISOString(), explanation: `JourneyOS cancelled ${cancelled.length} remaining Day ${day} activities, kept the hotel return available, and left every other day unchanged.` });
-      this.updateProgress();
-      return this.getTrip();
-    }
     if (!this.trip.request.destination.toLowerCase().includes('japan')) {
       const next = this.trip.itinerary.find((item) => item.status === 'upcoming' && (!activeDay || item.day === activeDay))
         ?? this.trip.itinerary.find((item) => item.status === 'upcoming');
-      const updates: Record<Exclude<TripEvent['type'], 'end-day'>, { title: string; explanation: string }> = {
+      const updates: Record<TripEvent['type'], { title: string; explanation: string }> = {
         late: { title: 'Running late +90 minutes', explanation: `JourneyOS moved the next ${this.trip.request.destination} stop later and protected the group’s highest-priority experience.` },
         rain: { title: 'Heavy rain forecast', explanation: `JourneyOS swapped the next outdoor ${this.trip.request.destination} moment for an indoor cultural option and kept travel time low.` },
         'flight-delay': { title: 'Flight delayed by 4 hours', explanation: `JourneyOS protected late hotel check-in, shortened the arrival-day plan in ${this.trip.request.destination}, and moved the displaced priority to tomorrow.` },
@@ -592,7 +646,7 @@ export class DemoStore {
       && !['completed', 'skipped', 'closed'].includes(item.status)
       && !['stay', 'transport'].includes(item.category))
       ?? this.trip.itinerary.find((item) => item.status === 'upcoming' && !['stay', 'transport'].includes(item.category));
-    const changes: Record<Exclude<TripEvent['type'], 'end-day'>, { title: string; explanation: string; mutate: () => void }> = {
+    const changes: Record<TripEvent['type'], { title: string; explanation: string; mutate: () => void }> = {
       late: {
         title: 'Running late +90 minutes',
         explanation: 'The tea ceremony moved to Day 4 at 16:30. We kept your booked Shinkansen and removed the low-priority shopping buffer, so the group still reaches Arashiyama before closing.',

@@ -178,14 +178,14 @@ test('hydration repairs previously saved meal times without resetting the trip',
   assert.equal(store.getTrip().itinerary.find((item) => item.id === dinner.id)?.time, '19:00');
 });
 
-test('voice end-day request skips only remaining activities on the selected day', () => {
+test('contextual itinerary commands target the selected day and can be undone', () => {
   const store = new DemoStore();
   const before = store.getTrip();
-  const otherDays = before.itinerary.filter((item) => item.day !== 3).map((item) => ({ id: item.id, status: item.status }));
-  const updated = store.replan('end-day', 3);
-  const cancelled = updated.itinerary.filter((item) => item.day === 3 && !['stay', 'transport'].includes(item.category));
-  assert.ok(cancelled.length > 0);
-  assert.ok(cancelled.filter((item) => ['upcoming', 'moved'].includes(before.itinerary.find((beforeItem) => beforeItem.id === item.id)?.status ?? '')).every((item) => item.status === 'skipped'));
-  assert.deepEqual(updated.itinerary.filter((item) => item.day !== 3).map((item) => ({ id: item.id, status: item.status })), otherDays);
-  assert.match(updated.events[0].explanation, /Day 3/);
+  const dayThree = before.itinerary.filter((item) => item.day === 3).sort((a, b) => a.time.localeCompare(b.time));
+  const completed = store.applyItineraryCommand('I saw place 2, mark it complete', 3);
+  assert.equal(completed.trip.itinerary.find((item) => item.id === dayThree[1].id)?.status, 'completed');
+  assert.equal(completed.affectedStopIds[0], dayThree[1].id);
+  const restored = store.applyItineraryCommand('undo place 2', 3);
+  assert.equal(restored.trip.itinerary.find((item) => item.id === dayThree[1].id)?.status, 'upcoming');
+  assert.equal(restored.trip.itinerary.find((item) => item.id === dayThree[0].id)?.status, before.itinerary.find((item) => item.id === dayThree[0].id)?.status);
 });

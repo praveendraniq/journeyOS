@@ -127,14 +127,14 @@ function LiveGoogleMap({ trip, activeDay }: { trip: Trip; activeDay: number }) {
   return <section className="overflow-hidden rounded-[28px] border border-stone-200 bg-white"><div className="flex items-center justify-between gap-3 px-5 py-4"><div><p className="eyebrow">Interactive day route</p><h3 className="mt-1 text-lg font-bold text-ink">Day {activeDay} · {trip.request.destination}</h3><p className="mt-1 text-xs text-stone-500">{stops.length} planned stops · {totalTransit} min estimated transit</p></div><a href={mapsUrl} target="_blank" rel="noreferrer" className="text-xs font-bold text-moss hover:text-ink">Open full map ↗</a></div><iframe title={`Google Maps itinerary for day ${activeDay} in ${trip.request.destination}`} src={src} className="h-80 w-full border-0" loading="lazy" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen /><div className="border-t border-stone-100 bg-[#fafbf9] px-5 py-4"><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-stone-400">Route order</p><ol className="mt-3 grid gap-2 sm:grid-cols-2">{stops.map((stop, index) => <li className="flex min-w-0 items-center gap-2 text-xs" key={stop.id}><span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-moss text-[10px] font-bold text-white">{index + 1}</span><span className="truncate font-semibold text-ink">{stop.time} · {stop.title}</span>{index < stops.length - 1 && <span className="ml-auto shrink-0 text-[10px] text-stone-400">→ {stops[index + 1].travelMins}m</span>}</li>)}</ol></div></section>;
 }
 
-function Timeline({ items, compact = false }: { items: ItineraryItem[]; compact?: boolean }) {
+function Timeline({ items, compact = false, onProgress }: { items: ItineraryItem[]; compact?: boolean; onProgress?: (item: ItineraryItem, action: 'complete' | 'restore') => void }) {
   return <div className={`relative ${compact ? 'space-y-3' : 'space-y-1'}`}>
     <div className="absolute bottom-4 left-[1.15rem] top-4 w-px bg-stone-200" />
     {items.map((item) => <div className="relative flex gap-3 py-2" key={item.id}>
       <div className="w-10 pt-2 text-right text-[11px] font-bold text-stone-400">{item.time}</div>
       <div className={`relative z-10 mt-1.5 h-3 w-3 shrink-0 rounded-full ring-4 ${item.status === 'completed' ? 'bg-moss ring-emerald-100' : item.status === 'current' ? 'bg-coral ring-orange-100' : item.status === 'moved' ? 'bg-amber-400 ring-amber-100' : 'bg-white ring-stone-200'}`} />
       <div className={`min-w-0 flex-1 rounded-2xl px-3 py-2.5 ${item.status === 'current' ? 'bg-[#fff2ed] ring-1 ring-orange-100' : item.status === 'moved' ? 'bg-amber-50 ring-1 ring-amber-100' : 'hover:bg-stone-50'}`}>
-        <div className="flex items-center gap-2"><IconBadge category={item.category} /><div className="min-w-0"><div className="flex items-center gap-2"><p className="truncate text-sm font-bold text-ink">{item.title}</p>{item.status === 'moved' && <span className="rounded-full bg-amber-200 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-800">Updated</span>}</div><p className="truncate text-xs text-stone-500">{item.subtitle} · {item.durationMins} min</p></div></div>
+        <div className="flex flex-wrap items-center gap-2"><IconBadge category={item.category} /><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><p className={`truncate text-sm font-bold ${item.status === 'completed' ? 'text-stone-400 line-through' : 'text-ink'}`}>{item.title}</p>{item.status === 'moved' && <span className="rounded-full bg-amber-200 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-800">Updated</span>}{item.status === 'skipped' && <span className="rounded-full bg-stone-200 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-stone-600">Skipped</span>}</div><p className="truncate text-xs text-stone-500">{item.subtitle} · {item.durationMins} min</p></div>{!['stay', 'transport'].includes(item.category) && <button onClick={() => { const action = item.status === 'completed' ? 'restore' : 'complete'; if (onProgress) onProgress(item, action); else window.dispatchEvent(new CustomEvent('journeyos-progress', { detail: { id: item.id, title: item.title, action } })); }} className={`shrink-0 rounded-lg px-3 py-2 text-[10px] font-bold ${item.status === 'completed' ? 'bg-stone-100 text-stone-600 hover:bg-stone-200' : 'bg-[#eff6f1] text-moss hover:bg-emerald-100'}`}>{item.status === 'completed' ? 'Undo done' : 'Mark done'}</button>}</div>
       </div>
     </div>)}
   </div>;
@@ -498,6 +498,9 @@ function MapOptimizationPanel({ trip, activeDay, onTrip }: { trip: Trip; activeD
   const savedMinutes = Math.max(18, stops.reduce((sum, item) => sum + item.travelMins, 0) - Math.max(20, stops.length * 18));
   const mutate = async (action: 'start' | 'complete' | 'skip' | 'delay', options: { id?: string; actualDurationMins?: number; minutes?: number }) => { setBusy(true); try { const response = await api.progressStop(action, trip, options); onTrip(response.trip, action === 'complete' ? 'Activity completed. Progress, schedule variance, route, and Travel DNA were updated.' : `Activity ${action} recorded.`); } catch (error) { onTrip(trip, error instanceof Error ? error.message : 'Could not update activity progress.'); } finally { setBusy(false); } };
   const latestDna = trip.travelDna.changes?.[0];
+  // Completion and undo now live directly on each optimized stop. Hide this
+  // older duplicate control surface so the live page has one source of truth.
+  if (import.meta.env.VITE_SHOW_LEGACY_LIVE_DEMOS !== 'true') return null;
   return <section className="mt-6 rounded-[28px] border border-stone-200 bg-white p-6"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="eyebrow text-moss">Route intelligence</p><h2 className="mt-1 text-2xl font-bold text-ink">Why this order works.</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-stone-600">JourneyOS groups nearby stops, protects time-sensitive visits, and redraws the sequence when a disruption changes the day.</p></div><div className="grid grid-cols-3 gap-2 text-center"><div className="rounded-xl bg-[#eff6f1] px-3 py-2"><b className="block text-moss">{(savedMinutes / 13).toFixed(1)} km</b><span className="text-[10px] text-stone-500">saved</span></div><div className="rounded-xl bg-[#eff6f1] px-3 py-2"><b className="block text-moss">{savedMinutes} min</b><span className="text-[10px] text-stone-500">saved</span></div><div className="rounded-xl bg-[#eff6f1] px-3 py-2"><b className="block text-moss">{Math.min(67, 20 + stops.length * 12)}%</b><span className="text-[10px] text-stone-500">less backtrack</span></div></div></div><div className="mt-5 grid gap-4 md:grid-cols-2"><article className="rounded-2xl bg-stone-50 p-4"><p className="text-xs font-bold uppercase tracking-widest text-stone-400">Before optimisation</p><ol className="mt-3 space-y-2">{before.map((item, index) => <li className="flex gap-2 text-sm text-stone-600" key={item.id}><span className="font-bold text-stone-400">{index + 1}</span>{item.title}</li>)}</ol></article><article className="rounded-2xl bg-[#eff6f1] p-4"><p className="text-xs font-bold uppercase tracking-widest text-moss">Optimised route</p><ol className="mt-3 space-y-2">{stops.map((item, index) => <li className="flex gap-2 text-sm text-ink" key={item.id}><span className="font-bold text-moss">{index + 1}</span><span>{item.title}{item.status === 'moved' && <b className="ml-2 text-xs text-coral">Updated</b>}</span></li>)}</ol></article></div><div className="mt-5 rounded-2xl border border-moss/20 bg-[#f6fbf7] p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="eyebrow text-moss">Live activity progress</p><h3 className="mt-1 text-lg font-bold text-ink">{currentStop ? currentStop.title : 'Day complete'}</h3><p className="mt-1 text-xs text-stone-600">{trip.progressState?.completionPercent ?? trip.progress}% complete · {trip.progressState?.scheduleVarianceMins ?? 0} minutes {Number(trip.progressState?.scheduleVarianceMins ?? 0) >= 0 ? 'behind' : 'ahead'}</p></div>{currentStop && <span className="rounded-full bg-white px-3 py-1.5 text-xs font-bold text-moss">{currentStop.status === 'in-progress' ? 'In progress' : `${currentStop.durationMins} min planned`}</span>}</div>{currentStop && <div className="mt-4 flex flex-wrap items-end gap-2">{currentStop.status !== 'in-progress' && <button disabled={busy} onClick={() => void mutate('start', { id: currentStop.id })} className="rounded-xl bg-ink px-4 py-2.5 text-sm font-bold text-white">Start activity</button>}<label className="text-xs font-bold text-stone-600">Actual minutes<input type="number" min="1" max="720" value={actualDuration} onChange={(event) => setActualDuration(Number(event.target.value))} className="ml-2 w-20 rounded-lg border border-stone-200 px-2 py-2" /></label><button disabled={busy} onClick={() => void mutate('complete', { id: currentStop.id, actualDurationMins: actualDuration })} className="rounded-xl bg-moss px-4 py-2.5 text-sm font-bold text-white">Complete</button><button disabled={busy} onClick={() => void mutate('skip', { id: currentStop.id })} className="rounded-xl border border-stone-200 px-4 py-2.5 text-sm font-bold text-stone-600">Skip</button><button disabled={busy} onClick={() => void mutate('delay', { minutes: 30 })} className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-bold text-amber-900">Running late +30m</button></div>}{latestDna && <p className="mt-4 rounded-xl bg-white px-4 py-3 text-sm text-stone-700"><b className="capitalize text-ink">Travel DNA learned from {latestDna.dimension}</b><span className="mt-1 block text-xs">{latestDna.reason.split(';')[0]}.</span></p>}</div>{changed.length > 0 && <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">Disruption applied: {changed.map((item) => item.title).join(', ')} changed on the live route and timeline.</p>}</section>;
 }
 
@@ -613,7 +616,7 @@ function PersistentVoiceAssistant({ trip, page, onTrip }: { trip: Trip; page: Pa
       selectedFlight: trip.flights.find((flight) => flight.selected)?.code,
       selectedHotel: trip.hotels.find((hotel) => hotel.selected)?.name,
       activeDay,
-      instruction: 'This page and trip are already active. Never restart trip planning or ask for the destination again. Give concise help relevant to the current page. On Live itinerary, emit replan_trip with type end-day when the traveler asks to cancel or end the rest of today; otherwise use tired, late, rain, closed, or flight-delay for fatigue, delays, weather, closures, or flight problems. Do not ask for facts already listed.',
+      instruction: 'This page and trip are already active. Never restart trip planning or ask for the destination again. Give concise help relevant to the current page. On Live itinerary, pass the traveler’s requested itinerary change verbatim through itinerary_command. The app already knows the selected day and resolves the requested stop, time period, completion, undo, skip, start, or delay. Do not ask for facts already listed.',
     });
   }, [activeDay, liveVoice.state, page, sendAction, trip]);
 
@@ -647,9 +650,24 @@ function PersistentVoiceAssistant({ trip, page, onTrip }: { trip: Trip; page: Pa
     }
   };
 
+  const applyItineraryCommand = async (query: string) => {
+    handledVoiceReplanRef.current = query.trim();
+    try {
+      const response = await api.itineraryCommand(query, activeDay, tripRef.current);
+      onTripRef.current(response.trip, response.message);
+    } catch (error) {
+      onTripRef.current(tripRef.current, error instanceof Error ? error.message : 'Could not apply that itinerary command.');
+    }
+  };
+
+  useEffect(() => onAction('itinerary_command', (payload) => {
+    const query = typeof payload.query === 'string' ? payload.query : typeof payload.command === 'string' ? payload.command : '';
+    if (query) void applyItineraryCommand(query);
+  }), [activeDay, onAction]);
+
   useEffect(() => onAction('replan_trip', (payload) => {
     const requested = typeof payload.type === 'string' ? payload.type.toLowerCase() : '';
-    const type = (['end-day', 'tired', 'late', 'rain', 'closed', 'flight-delay'] as ReplanType[]).find((candidate) => requested.includes(candidate));
+    const type = (['tired', 'late', 'rain', 'closed', 'flight-delay'] as ReplanType[]).find((candidate) => requested.includes(candidate));
     if (type) void applyVoiceReplan(type);
   }), [activeDay, onAction]);
 
@@ -673,16 +691,9 @@ function PersistentVoiceAssistant({ trip, page, onTrip }: { trip: Trip; page: Pa
     const latest = [...transcript].reverse().find((entry) => entry.role === 'user')?.text.trim();
     if (!latest || handledVoiceReplanRef.current === latest) return;
     const spoken = latest.toLowerCase();
-    let type: ReplanType | undefined;
-    if (/\b(cancel|skip|end|stop)\b.*\b(rest|remaining)\b.*\b(day|today)\b|\b(cancel|end)\b.*\btoday\b/.test(spoken)) type = 'end-day';
-    else if (/\b(tired|exhausted|need a break|slow down)\b/.test(spoken)) type = 'tired';
-    else if (/\b(rain|storm|weather)\b/.test(spoken)) type = 'rain';
-    else if (/\b(closed|closure|cancelled attraction)\b/.test(spoken)) type = 'closed';
-    else if (/\bflight\b.*\b(delay|late|cancel)/.test(spoken)) type = 'flight-delay';
-    else if (/\b(delay|delayed|late|stuck|long time|running behind)\b/.test(spoken)) type = 'late';
-    if (!type) return;
+    if (!/\b(complete|completed|done|finished|saw|visited|undo|restore|reopen|start|begin|arrived|cancel|skip|remove|drop|late|delay|delayed|behind|stuck)\b/.test(spoken)) return;
     handledVoiceReplanRef.current = latest;
-    void applyVoiceReplan(type);
+    void applyItineraryCommand(latest);
   }, [activeDay, page, transcript]);
 
   const toggle = async () => {
@@ -746,6 +757,17 @@ function App() {
     return () => { disposed = true; window.clearInterval(interval); };
   }, [trip?.preferenceCollection?.calls]);
   const onTrip = (updated: Trip, message: string) => { setTrip(updated); window.localStorage.setItem('journeyos-active-trip', JSON.stringify(updated)); setNotice(message); window.setTimeout(() => setNotice(null), 4200); };
+  useEffect(() => {
+    const handleProgress = (event: Event) => {
+      const detail = (event as CustomEvent<{ id: string; title: string; action: 'complete' | 'restore' }>).detail;
+      if (!detail || !trip) return;
+      void api.progressStop(detail.action, trip, { id: detail.id })
+        .then((response) => onTrip(response.trip, detail.action === 'complete' ? `${detail.title} marked complete. Use Undo done to restore it.` : `${detail.title} restored to the itinerary.`))
+        .catch((error: Error) => setNotice(error.message));
+    };
+    window.addEventListener('journeyos-progress', handleProgress);
+    return () => window.removeEventListener('journeyos-progress', handleProgress);
+  }, [trip]);
   const title = useMemo(() => nav.find((item) => item.id === page)?.label ?? 'JourneyOS', [page]);
   const hasTripBrief = Boolean(trip?.briefTranscript);
   const resetDemo = async () => { try { const response = await api.resetTrip(); clearVoiceTranscript(); setActiveDay(1); onTrip(response.trip, 'Demo reset to the deterministic Japan starting state.'); } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not reset the demo.'); } };

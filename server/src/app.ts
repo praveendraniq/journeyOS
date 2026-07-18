@@ -15,7 +15,7 @@ import { VocalBridgeService } from './services/voice-planner.service.js';
 import { WeatherService } from './services/weather.service.js';
 import type { PaymentOrder, TripEvent } from './types.js';
 
-const replanSchema = z.object({ type: z.enum(['late', 'rain', 'flight-delay', 'closed', 'tired', 'end-day']), activeDay: z.number().int().min(1).optional(), trip: z.unknown().optional() });
+const replanSchema = z.object({ type: z.enum(['late', 'rain', 'flight-delay', 'closed', 'tired']), activeDay: z.number().int().min(1).optional(), trip: z.unknown().optional() });
 const requestSchema = z.object({ conversation: z.string().min(3).max(1000) });
 const hydrateTripSchema = z.object({ trip: z.unknown() });
 const preferenceCollectionSchema = z.object({ adminName: z.string().min(2).max(60), adminPhone: z.string().min(7).max(30), phones: z.record(z.string(), z.string().min(7).max(30)), trip: z.unknown().optional() });
@@ -32,7 +32,8 @@ const preferenceCallCallbackSchema = z.object({
 const preferenceDecisionSchema = z.object({ interestScores: z.record(z.string(), z.number().min(1).max(5)), trip: z.unknown().optional() });
 const simulatedInterviewSchema = z.object({ trip: z.unknown().optional() });
 const selectionSchema = z.object({ id: z.string().min(1), trip: z.unknown().optional() });
-const progressSchema = z.object({ id: z.string().min(1).optional(), action: z.enum(['start', 'complete', 'skip', 'delay']), actualDurationMins: z.number().int().min(1).max(720).optional(), minutes: z.number().int().min(1).max(240).optional(), trip: z.unknown().optional() });
+const progressSchema = z.object({ id: z.string().min(1).optional(), action: z.enum(['start', 'complete', 'skip', 'restore', 'delay']), actualDurationMins: z.number().int().min(1).max(720).optional(), minutes: z.number().int().min(1).max(240).optional(), trip: z.unknown().optional() });
+const itineraryCommandSchema = z.object({ query: z.string().min(2).max(500), activeDay: z.number().int().min(1), trip: z.unknown().optional() });
 const travelerSchema = z.object({ action: z.enum(['add', 'update', 'remove']), id: z.string().min(1).optional(), name: z.string().min(2).max(60).optional(), phone: z.string().max(30).optional(), budgetPreference: z.enum(['value', 'balanced', 'premium']).optional(), activityLevel: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]).optional(), pacePreference: z.enum(['easy', 'balanced', 'full']).optional(), foodPreference: z.string().min(2).max(100).optional(), interests: z.object({ culture: z.number().min(1).max(5), history: z.number().min(1).max(5), food: z.number().min(1).max(5), photography: z.number().min(1).max(5), shopping: z.number().min(1).max(5), nightlife: z.number().min(1).max(5), nature: z.number().min(1).max(5) }).optional(), trip: z.unknown().optional() });
 const tripDetailsSchema = z.object({ origin: z.string().min(2).max(80), destination: z.string().min(2).max(80), departureDate: z.string().date(), returnDate: z.string().date(), trip: z.unknown().optional() });
 const receiptSchema = z.object({ amount: z.number().positive().optional(), restaurant: z.string().min(1).optional(), fileName: z.string().optional(), category: z.enum(['food', 'transport', 'activity', 'other']).optional(), paidBy: z.string().optional(), participantIds: z.array(z.string()).optional(), splitPercentages: z.record(z.string(), z.number().min(0).max(100)).optional(), trip: z.unknown().optional() }).superRefine((value, ctx) => {
@@ -245,9 +246,18 @@ export const createApp = () => {
       if (!input.id) return res.status(400).json({ error: 'An itinerary stop is required.' });
       if (input.action === 'start') return res.json({ trip: store.startStop(input.id) });
       if (input.action === 'skip') return res.json({ trip: store.skipStop(input.id) });
+      if (input.action === 'restore') return res.json({ trip: store.restoreStop(input.id) });
       return res.json({ trip: store.completeStop(input.id, input.actualDurationMins) });
     }
     catch (error) { next(error); }
+  });
+
+  app.post('/api/itinerary/command', (req, res, next) => {
+    try {
+      const input = itineraryCommandSchema.parse(req.body);
+      if (input.trip) store.hydrate(input.trip as ReturnType<typeof store.getTrip>);
+      res.json(store.applyItineraryCommand(input.query, input.activeDay));
+    } catch (error) { next(error); }
   });
 
   app.post('/api/itinerary/optimize', (_req, res) => {

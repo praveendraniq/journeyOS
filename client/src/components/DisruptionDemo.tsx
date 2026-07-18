@@ -30,6 +30,10 @@ export function DisruptionDemo({ trip, activeDay, onTrip }: { trip: Trip; active
     finally { setBusy(false); }
   };
 
+  // Free-form voice commands now drive live changes. Keep this prototype in
+  // source for reference, but do not present a second hard-coded demo flow.
+  if (import.meta.env.VITE_SHOW_LEGACY_LIVE_DEMOS !== 'true') return null;
+
   return <>
     <section className="mt-6 flex flex-col justify-between gap-4 rounded-[24px] border border-coral/20 bg-[#fff8e9] p-5 sm:flex-row sm:items-center"><div><p className="eyebrow text-coral">Live recovery demo</p><h2 className="mt-1 text-xl font-bold text-ink">The flight is four hours late. What breaks next?</h2><p className="mt-1 max-w-2xl text-sm leading-6 text-stone-600">JourneyOS traces the delay across hotel check-in, the first evening, group priorities, and cost—then waits for confirmation.</p></div><button onClick={openDemo} className="shrink-0 rounded-xl bg-ink px-5 py-3 text-sm font-bold text-white"><Zap className="mr-2 inline" size={16} />Run delay recovery</button></section>
     {open && <div className="fixed inset-0 z-[70] bg-ink/30 backdrop-blur-[1px]" onClick={close} aria-hidden="true" />}

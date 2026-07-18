@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
-import { Calculator, Receipt, ScanLine, Trash2 } from 'lucide-react';
+import { Calculator, CheckCircle2, CreditCard, MessageSquareText, Receipt, ScanLine, Trash2 } from 'lucide-react';
 import { api } from '../api';
-import type { Trip } from '../types';
+import type { PaymentOrder, Trip } from '../types';
 
 const money = (value: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value);
 const equalPercentages = (ids: string[]) => Object.fromEntries(ids.map((id) => [id, Number((100 / Math.max(1, ids.length)).toFixed(2))]));
@@ -14,6 +14,7 @@ export function ExpenseLedger({ trip, onTrip }: { trip: Trip; onTrip: (trip: Tri
   const [splitMode, setSplitMode] = useState<'equal' | 'custom'>('equal');
   const [splitPercentages, setSplitPercentages] = useState<Record<string, number>>(() => equalPercentages(trip.travelers.map((traveler) => traveler.id)));
   const [busy, setBusy] = useState(false);
+  const [paymentOrder, setPaymentOrder] = useState<PaymentOrder | null>(null);
   const expenses = trip.expenses ?? [];
 
   const travelerTotals = useMemo(() => {
@@ -36,6 +37,11 @@ export function ExpenseLedger({ trip, onTrip }: { trip: Trip; onTrip: (trip: Tri
   }, [expenses, trip.travelers]);
 
   const splitTotal = participants.reduce((sum, id) => sum + (splitPercentages[id] ?? 0), 0);
+  const amountToCollect = Array.from(travelerTotals.values()).reduce((sum, totals) => sum + Math.max(0, -totals.balance), 0);
+  const settlementPercentages = Object.fromEntries(trip.travelers.map((traveler) => {
+    const owed = Math.max(0, -(travelerTotals.get(traveler.id)?.balance ?? 0));
+    return [traveler.id, amountToCollect > 0 ? Number((owed / amountToCollect * 100).toFixed(4)) : 0];
+  }));
   const validCustomSplit = splitMode === 'equal' || Math.abs(splitTotal - 100) < 0.01;
   const toggleParticipant = (id: string) => setParticipants((current) => {
     const next = current.includes(id) ? current.filter((item) => item !== id) : [...current, id];
@@ -62,7 +68,35 @@ export function ExpenseLedger({ trip, onTrip }: { trip: Trip; onTrip: (trip: Tri
     finally { setBusy(false); }
   };
 
-  return <section className="mt-6 rounded-[28px] border border-stone-200 bg-white p-5 sm:p-6">
+  const createSettlementOrder = async () => {
+    if (amountToCollect <= 0) return;
+    const popup = window.open('', 'journeyos-paypal-expenses', 'width=520,height=720');
+    setBusy(true);
+    try {
+      const response = await api.createOrder(settlementPercentages, Number(amountToCollect.toFixed(2)));
+      setPaymentOrder(response.order);
+      if (response.order.approveUrl && popup) popup.location.href = response.order.approveUrl;
+      else popup?.close();
+      onTrip(trip, response.order.mock ? 'Settlement simulation prepared. Add PayPal sandbox credentials and set MOCK_MODE=false for the approval screen.' : 'PayPal sandbox approval opened in a new window.');
+    } catch (error) { popup?.close(); onTrip(trip, error instanceof Error ? error.message : 'Could not create the settlement order.'); }
+    finally { setBusy(false); }
+  };
+
+  const captureSettlement = async () => {
+    if (!paymentOrder) return;
+    setBusy(true);
+    try { const response = await api.captureOrder(paymentOrder.id); setPaymentOrder(response.order); onTrip(trip, response.order.mock ? 'Demo settlement completed; no money moved.' : 'PayPal sandbox settlement captured.'); }
+    catch (error) { onTrip(trip, error instanceof Error ? error.message : 'Could not capture the settlement.'); }
+    finally { setBusy(false); }
+  };
+
+  const copySettlementMessages = async () => {
+    const messages = trip.travelers.map((traveler) => { const balance = travelerTotals.get(traveler.id)?.balance ?? 0; return `${traveler.name}: ${balance < -0.005 ? `please pay ${money(Math.abs(balance))}` : balance > 0.005 ? `you will receive ${money(balance)}` : 'you are settled'}.`; }).join('\n');
+    await navigator.clipboard.writeText(messages);
+    onTrip(trip, 'Private settlement messages copied. Connect an SMS provider later to send them automatically.');
+  };
+
+  return <section className="mb-28 mt-6 rounded-[28px] border border-stone-200 bg-white p-5 sm:p-6">
     <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="eyebrow text-moss">Live expense ledger</p><h2 className="mt-1 text-2xl font-bold text-ink">Scan now. Settle once at trip end.</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-stone-600">Record who paid and who shared each expense. JourneyOS nets every receipt, so each traveler makes at most one final settlement.</p></div><Receipt className="text-coral" /></div>
     <div className="mt-5 grid gap-3 lg:grid-cols-[1.3fr_0.7fr_0.9fr]">
       <label className="text-xs font-bold text-stone-500">Receipt description<input value={description} onChange={(event) => setDescription(event.target.value)} className="mt-1 w-full rounded-xl border border-stone-200 px-3 py-2.5 text-sm text-ink" /></label>
@@ -80,5 +114,8 @@ export function ExpenseLedger({ trip, onTrip }: { trip: Trip; onTrip: (trip: Tri
       <div className="min-w-0"><h3 className="flex items-center gap-2 font-bold text-ink"><Receipt size={17} className="text-coral" />Recorded receipts</h3>{expenses.length ? <div className="mt-3 space-y-2">{expenses.map((expense) => { const payer = trip.travelers.find((traveler) => traveler.id === expense.paidBy); return <div key={expense.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-stone-50 px-4 py-3 text-sm"><span className="min-w-0 flex-1"><b className="block truncate text-ink">{expense.description}</b><small className="mt-1 block text-stone-500">{payer?.name ?? 'Traveler'} paid · {expense.splitPercentages ? 'custom percentage split' : `split across ${expense.participantIds.length}`}</small></span><span className="flex shrink-0 items-center gap-3"><b className="text-ink">{money(expense.amount)}</b><button disabled={busy} onClick={() => void deleteReceipt(expense.id, expense.description)} aria-label={`Delete ${expense.description}`} title="Delete incorrect receipt" className="grid h-9 w-9 place-items-center rounded-lg text-coral transition hover:bg-red-50 disabled:opacity-40"><Trash2 size={16} /></button></span></div>; })}</div> : <p className="mt-3 rounded-xl bg-stone-50 px-4 py-5 text-sm text-stone-500">No variable expenses recorded yet. Add one receipt to demonstrate the live tally.</p>}</div>
       <aside className="min-w-0 rounded-2xl bg-[#eff6f1] p-5"><h3 className="flex items-center gap-2 font-bold text-ink"><Calculator size={17} className="shrink-0 text-moss" />Traveler totals & final settlement</h3><div className="mt-3 space-y-2">{trip.travelers.map((traveler) => { const totals = travelerTotals.get(traveler.id) ?? { paid: 0, share: 0, balance: 0 }; return <div key={traveler.id} className="border-b border-moss/10 py-2"><div className="flex flex-wrap items-center justify-between gap-1 text-sm"><span className="font-semibold text-ink">{traveler.name}</span><b className={totals.balance > 0.005 ? 'text-moss' : totals.balance < -0.005 ? 'text-coral' : 'text-stone-500'}>{totals.balance > 0.005 ? `receives ${money(totals.balance)}` : totals.balance < -0.005 ? `owes ${money(Math.abs(totals.balance))}` : 'settled'}</b></div><p className="mt-1 text-[11px] text-stone-500">Paid {money(totals.paid)} · personal share {money(totals.share)}</p></div>; })}</div><p className="mt-4 text-xs leading-5 text-stone-600">This settlement covers variable shared expenses only. Flight and hotel payments remain separate and are never counted again.</p></aside>
     </div>
+    <section className="mt-5 rounded-2xl border border-[#0070ba]/20 bg-[#f3f9ff] p-5 pb-6">
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><p className="eyebrow text-[#0070ba]">End-of-trip settlement</p><h3 className="mt-1 text-lg font-bold text-ink">Collect {money(amountToCollect)} once, after receipts are final.</h3><p className="mt-2 max-w-2xl text-xs leading-5 text-stone-600">This excludes flights and hotels. A real PayPal sandbox approval opens only when the server has credentials and <code>MOCK_MODE=false</code>.</p></div><div className="flex flex-wrap gap-2"><button onClick={() => void copySettlementMessages()} className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-3 text-xs font-bold text-ink"><MessageSquareText size={16} />Copy payment messages</button>{!paymentOrder ? <button disabled={busy || amountToCollect <= 0} onClick={() => void createSettlementOrder()} className="inline-flex items-center gap-2 rounded-xl bg-[#ffc439] px-4 py-3 text-xs font-bold text-[#1d2d35] disabled:opacity-40"><CreditCard size={16} />Collect with PayPal sandbox</button> : paymentOrder.status === 'COMPLETED' ? <span className="inline-flex items-center gap-2 rounded-xl bg-moss px-4 py-3 text-xs font-bold text-white"><CheckCircle2 size={16} />Settlement complete</span> : <><a href={paymentOrder.approveUrl} target="_blank" rel="noreferrer" className="rounded-xl bg-[#0070ba] px-4 py-3 text-xs font-bold text-white">Open PayPal approval</a><button disabled={busy} onClick={() => void captureSettlement()} className="rounded-xl bg-[#ffc439] px-4 py-3 text-xs font-bold text-[#1d2d35]">{paymentOrder.mock ? 'Complete simulation' : 'Capture approved payment'}</button></>}</div></div>
+    </section>
   </section>;
 }
