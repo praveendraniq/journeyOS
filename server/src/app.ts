@@ -11,12 +11,30 @@ import { knownBookingTotal, PayPalService } from './services/payment.service.js'
 import { RouteOptimizer } from './services/route-optimizer.service.js';
 import { SabreService } from './services/sabre.service.js';
 import { SabreMcpService } from './services/sabre-mcp.service.js';
-import { VocalBridgeService } from './services/voice-planner.service.js';
+import { mergeStructuredTripRequest, tripRequestMissingFields, VocalBridgeService } from './services/voice-planner.service.js';
 import { WeatherService } from './services/weather.service.js';
 import type { PaymentOrder, TripEvent } from './types.js';
 
 const replanSchema = z.object({ type: z.enum(['late', 'rain', 'flight-delay', 'closed', 'tired']), activeDay: z.number().int().min(1).optional(), trip: z.unknown().optional() });
-const requestSchema = z.object({ conversation: z.string().min(3).max(1000) });
+// A complete Vocal Bridge session includes the polished action summary plus
+// question/answer context. Keep a firm bound, but allow a normal voice call.
+const interestSchema = z.enum(['culture', 'history', 'food', 'photography', 'shopping', 'nightlife', 'nature']);
+const structuredTripRequestSchema = z.object({
+  origin: z.string().trim().min(2).max(80).optional(),
+  destination: z.string().trim().min(2).max(80).optional(),
+  departureDate: z.string().date().optional(),
+  returnDate: z.string().date().optional(),
+  travelers: z.number().int().min(1).max(50).optional(),
+  budget: z.number().positive().max(10_000_000).optional(),
+  travelStyle: z.string().trim().min(2).max(120).optional(),
+  foodPreferences: z.array(z.string().trim().min(1).max(120)).max(8).optional(),
+  interests: z.array(interestSchema).max(7).optional(),
+}).partial();
+const requestSchema = z.object({
+  conversation: z.string().min(3).max(20_000),
+  structuredRequest: structuredTripRequestSchema.optional(),
+  trip: z.unknown().optional(),
+});
 const hydrateTripSchema = z.object({ trip: z.unknown() });
 const preferenceCollectionSchema = z.object({ adminName: z.string().min(2).max(60), adminPhone: z.string().min(7).max(30), phones: z.record(z.string(), z.string().min(7).max(30)), trip: z.unknown().optional() });
 const preferenceList = z.union([z.string().min(1).max(160), z.array(z.string().min(1).max(160)).max(8)]).transform((value) => Array.isArray(value) ? value : [value]);
@@ -111,7 +129,7 @@ export const createApp = () => {
         interests: trip.request.interests,
         foodPreferences: trip.request.foodPreferences,
       },
-      instruction: 'Use this as established context. Do not ask the callee to repeat these facts. Ask only for their personal priorities, constraints, pace, food needs, and a compromise they would accept.',
+      instruction: 'Use this as established context. Do not ask the callee to repeat these facts, and do not repeat each answer back. Ask only one must-do, food or avoid needs, and easy/balanced/active pace. Confirm the collected preferences once at the end, save the result, say one short goodbye, and immediately end_call. Target 45 seconds, but finish the current exchange gracefully rather than cutting off audio.',
     });
   });
   app.post('/api/preference-calls/complete', (req, res, next) => {
@@ -152,8 +170,23 @@ export const createApp = () => {
 
   app.post('/api/planner/extract', async (req, res, next) => {
     try {
-      const { conversation } = requestSchema.parse(req.body);
-      const result = await planner.extractTrip(conversation);
+      const { conversation, structuredRequest, trip: currentTrip } = requestSchema.parse(req.body);
+      if (currentTrip) store.hydrate(currentTrip as ReturnType<typeof store.getTrip>);
+      const extracted = await planner.extractTrip(conversation);
+      const mergedRequest = mergeStructuredTripRequest(extracted.request, structuredRequest);
+      const result = {
+        ...extracted,
+        request: mergedRequest,
+        source: structuredRequest && Object.keys(structuredRequest).length ? 'vocal-bridge' as const : extracted.source,
+        confidence: structuredRequest && Object.keys(structuredRequest).length ? Math.max(0.99, extracted.confidence) : extracted.confidence,
+        missingFields: tripRequestMissingFields(mergedRequest),
+      };
+      if (result.missingFields.length) {
+        return res.status(422).json({
+          error: `The completed voice brief is missing: ${result.missingFields.join(', ')}. Start a short new call and provide those details; demo defaults were not used.`,
+          missingFields: result.missingFields,
+        });
+      }
       let attractions: PlaceAttraction[] = [];
       let placesDiagnostic: string | undefined;
       try { attractions = await places.searchAttractions(result.request.destination, result.request.duration * 4, { interests: result.request.interests, foodPreferences: result.request.foodPreferences }); }

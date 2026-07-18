@@ -169,7 +169,7 @@ const itineraryFromPlaces = (destination: string, duration: number, places: Plac
 const groupPreference: GroupPreference = {
   interestScores: { culture: 4.75, history: 3.5, food: 4.25, photography: 3.5, shopping: 2, nightlife: 2.25, nature: 3.25 },
   recommendedPace: 'Balanced discovery',
-  explanation: 'Kyoto leads the route because all four travelers value culture, and three of four also ranked history or photography highly.',
+  explanation: 'Kyoto leads the route because both travelers value culture, with history and food protected across the itinerary.',
 };
 
 export class DemoStore {
@@ -178,9 +178,9 @@ export class DemoStore {
   constructor() {
     this.trip = {
       schemaVersion: 2,
-      id: 'trip-japan-2026', name: 'Japan, together', dates: '12–16 Oct 2026',
-      request: { origin: 'San Francisco', destination: 'Japan', departureDate: '2026-10-12', returnDate: '2026-10-16', duration: 5, travelers: 4, budget: 6000, travelStyle: 'culture-forward, unhurried', foodPreferences: ['sushi', 'vegetarian friendly', 'street food'], interests: ['culture', 'history', 'food', 'photography'] },
-      travelers,
+      id: 'trip-japan-2026', name: 'Tokyo, together', dates: '12–16 Oct 2026',
+      request: { origin: 'San Francisco', destination: 'Tokyo', departureDate: '2026-10-12', returnDate: '2026-10-16', duration: 5, travelers: 2, budget: 4000, travelStyle: 'culture-forward, unhurried', foodPreferences: ['sushi', 'vegetarian friendly', 'street food'], interests: ['culture', 'history', 'food', 'photography'] },
+      travelers: travelers.slice(0, 2),
       groupPreference,
       flights: [
         { id: 'f-jal', airline: 'Japan Airlines', code: 'JL 001', departure: 'SFO', arrival: 'HND', departureTime: '11:45', arrivalTime: '16:20 +1', price: 1120, duration: '11h 35m', stops: 0, selected: true },
@@ -193,7 +193,7 @@ export class DemoStore {
         { id: 'h-thegate', name: 'THE GATE HOTEL', location: 'Kaminarimon, Tokyo', rating: 4.6, price: 208, totalPrice: 624, image: 'Gate', amenities: ['Rooftop', 'Metro access', 'Gym'] },
       ],
       itinerary,
-      budget: { total: 6000, spent: 4768, remaining: 1232, flight: 1120 * 4, hotel: 894, activities: 610, food: 384 },
+      budget: { total: 4000, spent: 3684, remaining: 316, flight: 1120 * 2, hotel: 894, activities: 310, food: 240 },
       travelDna: { culture: 5, history: 5, photography: 4, shopping: 1, nightlife: 2, food: 5, learning: 'The group lingers at temples and food stops; preserve open time around cultural neighborhoods.' },
       events: [],
       progress: 28,
@@ -264,19 +264,22 @@ export class DemoStore {
   }
 
   updateTripDetails(input: { origin: string; destination: string; departureDate: string; returnDate: string }): Trip {
+    const origin = input.origin.trim();
+    const destination = input.destination.trim();
+    if (!origin || !destination) throw new Error('Origin and destination city names are required.');
     const departure = new Date(`${input.departureDate}T12:00:00Z`);
     const returning = new Date(`${input.returnDate}T12:00:00Z`);
     if (!Number.isFinite(departure.getTime()) || !Number.isFinite(returning.getTime()) || returning <= departure) throw new Error('Return date must be after the departure date.');
-    const destinationChanged = input.destination.trim().toLowerCase() !== this.trip.request.destination.toLowerCase();
+    const destinationChanged = destination.toLowerCase() !== this.trip.request.destination.toLowerCase();
     const rawDuration = Math.round((returning.getTime() - departure.getTime()) / 86_400_000) + 1;
     if (rawDuration > MAX_ITINERARY_DAYS) throw new Error(`For this demo, choose a trip of up to ${MAX_ITINERARY_DAYS} days.`);
     const duration = rawDuration;
-    this.trip.request = { ...this.trip.request, origin: input.origin.trim(), destination: input.destination.trim(), departureDate: input.departureDate, returnDate: input.returnDate, duration };
-    this.trip.name = `${input.destination.trim()}, together`;
+    this.trip.request = { ...this.trip.request, origin, destination, departureDate: input.departureDate, returnDate: input.returnDate, duration };
+    this.trip.name = `${destination}, together`;
     this.trip.dates = `${departure.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}–${returning.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}`;
     if (destinationChanged) {
-      this.trip.itinerary = itineraryFor(input.destination, duration);
-      this.setBookingOptions(input.destination);
+      this.trip.itinerary = itineraryFor(destination, duration);
+      this.setBookingOptions(destination);
       this.trip.preferenceCollection = undefined;
     }
     const selectedFlight = this.trip.flights.find((flight) => flight.selected) ?? this.trip.flights[0];
@@ -517,17 +520,34 @@ export class DemoStore {
 
   updateFromRequest(request: Trip['request'], places: PlaceAttraction[] = [], briefTranscript?: string): Trip {
     const hadPriorBrief = Boolean(this.trip.briefTranscript);
+    const origin = request.origin?.trim();
+    const destination = request.destination.trim();
+    if (!origin || !destination) throw new Error('The voice brief must contain valid origin and destination city names.');
     const dates = normalizedTripDates(request.departureDate ?? this.trip.request.departureDate, request.returnDate, request.duration);
-    const normalizedRequest = { ...this.trip.request, ...request, ...dates };
+    const normalizedRequest = { ...this.trip.request, ...request, origin, destination, ...dates };
     this.trip.request = normalizedRequest;
     const { departureDate, returnDate, duration } = normalizedRequest;
     const departure = new Date(`${departureDate}T12:00:00Z`);
     const returning = new Date(`${returnDate}T12:00:00Z`);
     this.trip.dates = `${departure.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}–${returning.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}`;
-    // A fresh trip always starts with the organizer. Their name, phone and
-    // preferences come from the voice brief when supplied, with a safe demo
-    // default for the admin. The remaining slots are friends only.
-    if (!hadPriorBrief) this.trip.travelers = [adminFromBrief(briefTranscript, normalizedRequest)];
+    // The organizer's preferences must refresh from every confirmed voice
+    // brief, not only the first one. Keep an explicitly saved name/phone while
+    // updating the pace, food needs and interests that drive the itinerary.
+    const briefAdmin = adminFromBrief(briefTranscript, normalizedRequest);
+    if (!hadPriorBrief) this.trip.travelers = [briefAdmin];
+    else if (this.trip.travelers[0]) {
+      const currentAdmin = this.trip.travelers[0];
+      const nameWasProvided = Boolean(briefTranscript?.match(/(?:my name is|i am|i'm)\s+[a-z]/i));
+      const phoneWasProvided = Boolean(briefTranscript?.match(/(?:my (?:phone|number) is|call me at|my phone number is)\s*\+?[\d().\s-]{7,}/i));
+      Object.assign(currentAdmin, {
+        ...(nameWasProvided || currentAdmin.name === 'Aya' ? { name: briefAdmin.name, initials: briefAdmin.initials } : {}),
+        ...(phoneWasProvided || currentAdmin.phone === '+1 (415) 555-0101' ? { phone: briefAdmin.phone } : {}),
+        pacePreference: briefAdmin.pacePreference,
+        activityLevel: briefAdmin.activityLevel,
+        foodPreference: briefAdmin.foodPreference,
+        interests: briefAdmin.interests,
+      });
+    }
     this.trip.travelers = this.trip.travelers.slice(0, Math.max(1, normalizedRequest.travelers));
     while (this.trip.travelers.length < normalizedRequest.travelers) {
       const number = this.trip.travelers.length + 1;
