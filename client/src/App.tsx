@@ -6,7 +6,7 @@ import {
   Utensils, WalletCards, Zap,
 } from 'lucide-react';
 import { api } from './api';
-import type { Interest, ItineraryItem, ItemCategory, PaymentOrder, ReplanType, Trip } from './types';
+import type { Interest, ItineraryItem, ItemCategory, PaymentOrder, ReplanType, Trip, TripRequest } from './types';
 import { useAgentActions, useTranscript, useVocalBridge } from '@vocalbridgeai/react';
 import { BookingExperience } from './components/BookingExperience';
 import { GroupPlanningPanel } from './components/GroupPlanningPanel';
@@ -99,17 +99,22 @@ function LiveGoogleMap({ trip, activeDay }: { trip: Trip; activeDay: number }) {
   const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
   if (!key || key.includes('PASTE_YOUR') || key.includes('your_key')) return null;
   const stops = trip.itinerary.filter((item) => item.day === activeDay).sort((a, b) => a.time.localeCompare(b.time));
-  const routeAnchor = trip.request.destination.toLowerCase() === 'japan' ? 'Tokyo, Japan' : trip.request.destination;
-  // Google geocodes complete stop names much more reliably than the abbreviated
-  // labels shown in the itinerary (for example, "Asakusa · Tokyo").
+  const routeAnchor = trip.request.destination;
+  const selectedHotel = trip.hotels.find((hotel) => hotel.selected) ?? trip.hotels[0];
+  const hotelAnchor = [selectedHotel?.location, routeAnchor].filter(Boolean).join(', ');
+  // Places responses already contain strong postal addresses. Appending a
+  // demo hotel name or the destination again can make an otherwise valid
+  // address impossible for Google Directions to resolve.
   const locationFor = (item: ItineraryItem) => {
     const label = item.subtitle.replace(/\s*·\s*/g, ', ').replace(/\s*→\s*/g, ' to ');
-    // Demo hotel labels such as "Central Japan" are not geocodable route
-    // endpoints. Anchor them to the actual destination city instead.
-    if (/^(central|downtown)\s+/i.test(label) || /city center/i.test(label)) return `${item.title}, ${routeAnchor}`;
-    return `${item.title}, ${label}, ${routeAnchor}`;
+    const isHotelStop = item.category === 'stay' || Boolean(selectedHotel?.name && item.title.toLowerCase().includes(selectedHotel.name.toLowerCase()));
+    if (isHotelStop) return hotelAnchor || routeAnchor;
+    if (/\d/.test(label) && /(?:street|st\.?|road|rd\.?|avenue|ave\.?|boulevard|blvd\.?|highway|hwy\.?|drive|dr\.?|lane|ln\.?|place|pl\.?|way|usa)\b/i.test(label)) return label;
+    if (/^(central|downtown)\s+/i.test(label) || /city center/i.test(label)) return routeAnchor;
+    if (label.toLowerCase().includes(routeAnchor.toLowerCase())) return `${item.title}, ${label}`;
+    return `${item.title}, ${label || routeAnchor}, ${routeAnchor}`;
   };
-  const locations = stops.map(locationFor);
+  const locations = stops.map(locationFor).map((location) => location.trim()).filter(Boolean);
   const uniqueLocations = [...new Set(locations.map((location) => location.trim().toLowerCase()))];
   const origin = locations[0] ?? trip.request.destination;
   const destination = locations[locations.length - 1] ?? trip.request.destination;
@@ -120,7 +125,7 @@ function LiveGoogleMap({ trip, activeDay }: { trip: Trip; activeDay: number }) {
     : `https://www.google.com/maps/embed/v1/directions?key=${encodeURIComponent(key)}&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}${waypointQuery}&mode=driving`;
   const mapsUrl = `https://www.google.com/maps/dir/${locations.map(encodeURIComponent).join('/')}`;
   const totalTransit = stops.reduce((sum, item) => sum + item.travelMins, 0);
-  return <section className="overflow-hidden rounded-[28px] border border-stone-200 bg-white"><div className="flex items-center justify-between gap-3 px-5 py-4"><div><p className="eyebrow">Interactive day route</p><h3 className="mt-1 text-lg font-bold text-ink">Day {activeDay} · {trip.request.destination}</h3><p className="mt-1 text-xs text-stone-500">{stops.length} planned stops · {totalTransit} min estimated transit</p></div><a href={mapsUrl} target="_blank" rel="noreferrer" className="text-xs font-bold text-moss hover:text-ink">Open full map ↗</a></div><iframe title={`Google Maps itinerary for day ${activeDay} in ${trip.request.destination}`} src={src} className="h-80 w-full border-0" loading="lazy" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen /><div className="border-t border-stone-100 bg-[#fafbf9] px-5 py-4"><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-stone-400">Route order</p><ol className="mt-3 grid gap-2 sm:grid-cols-2">{stops.map((stop, index) => <li className="flex min-w-0 items-center gap-2 text-xs" key={stop.id}><span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-moss text-[10px] font-bold text-white">{index + 1}</span><span className="truncate font-semibold text-ink">{stop.time} · {stop.title}</span>{index < stops.length - 1 && <span className="ml-auto shrink-0 text-[10px] text-stone-400">→ {stops[index + 1].travelMins}m</span>}</li>)}</ol></div></section>;
+  return <section className="overflow-hidden rounded-[28px] border border-stone-200 bg-white"><div className="flex items-center justify-between gap-3 px-5 py-4"><div><p className="eyebrow">Interactive day route</p><h3 className="mt-1 text-lg font-bold text-ink">Day {activeDay} · {trip.request.destination}</h3><p className="mt-1 text-xs text-stone-500">{stops.length} planned stops · {totalTransit} min estimated transit</p></div><a href={mapsUrl} target="_blank" rel="noreferrer" className="text-xs font-bold text-moss hover:text-ink">Open full map ↗</a></div><iframe key={`${activeDay}-${src}`} title={`Google Maps itinerary for day ${activeDay} in ${trip.request.destination}`} src={src} className="h-80 w-full border-0" loading="lazy" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen /><div className="border-t border-stone-100 bg-[#fafbf9] px-5 py-4"><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-stone-400">Route order</p><ol className="mt-3 grid gap-2 sm:grid-cols-2">{stops.map((stop, index) => <li className="flex min-w-0 items-center gap-2 text-xs" key={stop.id}><span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-moss text-[10px] font-bold text-white">{index + 1}</span><span className="truncate font-semibold text-ink">{stop.time} · {stop.title}</span>{index < stops.length - 1 && <span className="ml-auto shrink-0 text-[10px] text-stone-400">→ {stops[index + 1].travelMins}m</span>}</li>)}</ol></div></section>;
 }
 
 function Timeline({ items, compact = false }: { items: ItineraryItem[]; compact?: boolean }) {
@@ -208,7 +213,7 @@ function FriendSetup({ trip, onTrip }: { trip: Trip; onTrip: (trip: Trip, note: 
 
 function VoicePlanner({ trip, onTrip }: { trip: Trip; onTrip: (trip: Trip, note: string) => void }) {
   const sampleVoiceCommand = `Plan a ${trip.request.duration}-day ${trip.request.destination} trip for ${trip.request.travelers} friends under $${trip.request.budget.toLocaleString()}. We enjoy ${trip.request.interests.join(', ')}.`;
-  const [conversation, setConversation] = useState(() => trip.briefTranscript ?? `Plan a ${trip.request.duration}-day ${trip.request.destination} trip for ${trip.request.travelers} friends under $${trip.request.budget.toLocaleString()}. We love ${trip.request.interests.join(', ')}.`);
+  const [conversation, setConversation] = useState(() => trip.briefTranscript ?? '');
   const [listening, setListening] = useState(false);
   const [speechStatus, setSpeechStatus] = useState('Tap the microphone and allow access when your browser asks.');
   const [loading, setLoading] = useState(false);
@@ -224,7 +229,6 @@ function VoicePlanner({ trip, onTrip }: { trip: Trip; onTrip: (trip: Trip, note:
   const mockVoiceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chunkTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chunkBaseRef = useRef('');
-  const appliedVocalBriefRef = useRef('');
   const speechSupported = typeof window !== 'undefined' && Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
   const liveVoiceConnected = liveVoice.state === 'connected' || liveVoice.state === 'connecting' || liveVoice.state === 'waiting_for_agent';
 
@@ -237,22 +241,15 @@ function VoicePlanner({ trip, onTrip }: { trip: Trip; onTrip: (trip: Trip, note:
     setResult((current) => current ?? { confidence: 1, source: 'vocal-bridge', summary: trip.briefTranscript ?? '', request: trip.request });
   }, [trip.briefTranscript, trip.request]);
 
-  useEffect(() => {
-    const spokenBrief = transcript.filter((entry) => entry.role === 'user').map((entry) => entry.text.trim()).filter(Boolean).join(' ');
-    if (spokenBrief) {
-      setConversation(spokenBrief);
-      setSpeechStatus('Travel Mediator captured your spoken details. The trip will update when this voice chat ends.');
-    }
-  }, [transcript]);
-
   const toggleLiveVoice = async () => {
     try {
       if (liveVoiceConnected) {
-        await liveVoice.toggleMicrophone();
-        setSpeechStatus(liveVoice.isMicrophoneEnabled ? 'Microphone muted. Tap again when you are ready to continue.' : 'Microphone live. Continue your existing JourneyOS conversation.');
+        await liveVoice.disconnect();
+        setSpeechStatus('Voice conversation ended. Tap the microphone to start a new conversation.');
         return;
       }
       setSpeechStatus('Connecting securely to Travel Mediator…');
+      window.dispatchEvent(new Event('journeyos:voice-connect-requested'));
       await liveVoice.connect();
       setSpeechStatus('Connected to Travel Mediator. Speak naturally about your trip.');
     } catch (error) {
@@ -360,7 +357,7 @@ function VoicePlanner({ trip, onTrip }: { trip: Trip; onTrip: (trip: Trip, note:
     if (brief.trim().length < 3) return;
     setLoading(true);
     try {
-      const response = await api.extractPlan(brief);
+      const response = await api.extractPlan(brief, trip);
       setResult(response);
       setConversation(response.summary);
       if (fromVoice) void sendAction('trip_plan_created', { destination: response.trip.request.destination, duration: response.trip.request.duration, travelers: response.trip.request.travelers });
@@ -368,14 +365,6 @@ function VoicePlanner({ trip, onTrip }: { trip: Trip; onTrip: (trip: Trip, note:
     } catch (error) { onTrip(trip, error instanceof Error ? error.message : 'Could not extract that trip request.'); }
     finally { setLoading(false); }
   };
-  useEffect(() => {
-    const spokenBrief = transcript.filter((entry) => entry.role === 'user').map((entry) => entry.text.trim()).filter(Boolean).join(' ');
-    const finalSummary = [...transcript].reverse().find((entry) => entry.role === 'agent')?.text ?? '';
-    const agentConfirmedPlan = /(?:i(?:'m| am) planning|your trip brief is ready|here(?:'s| is) your trip)/i.test(finalSummary);
-    if (!agentConfirmedPlan || spokenBrief.length < 3 || appliedVocalBriefRef.current === spokenBrief) return;
-    appliedVocalBriefRef.current = spokenBrief;
-    void createPlan(spokenBrief, true);
-  }, [transcript]);
   const extracted = result?.request ?? trip.request;
   return <div className="planner-workflow grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
     <section className="relative overflow-hidden rounded-[32px] bg-[#eff6f1] px-6 py-8 sm:px-10"><div className="relative z-10"><p className="eyebrow text-moss">Live Vocal Bridge voice</p><h1 className="mt-2 font-display text-4xl leading-[0.95] text-ink sm:text-5xl">Tell us where the story goes.</h1><p className="mt-4 max-w-md text-sm leading-6 text-stone-600">Speak naturally with the Travel Mediator. JourneyOS puts your latest spoken trip brief into the plan for review.</p><div className="mt-8 flex flex-col items-center"><button type="button" onClick={() => void toggleLiveVoice()} aria-pressed={liveVoiceConnected} aria-label={liveVoiceConnected ? 'End voice conversation' : 'Start voice conversation'} className={`grid h-36 w-36 place-items-center rounded-full border-[10px] border-white shadow-xl transition ${liveVoiceConnected ? 'bg-coral text-white animate-pulse' : 'bg-moss text-white hover:scale-105'}`}><Mic size={42} /></button><p className="mt-4 text-sm font-bold text-ink">{liveVoice.state === 'connecting' ? 'Connecting…' : liveVoiceConnected ? 'Live — tap to end voice chat' : 'Tap to talk with Travel Mediator'}</p><p className="mt-2 max-w-sm text-center text-xs leading-5 text-stone-500">{liveVoice.error?.message ?? speechStatus}</p><p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-moss/60">{liveVoiceConnected ? 'Vocal Bridge · WebRTC connected' : 'Vocal Bridge · secure server token'}</p></div></div><div className="absolute -bottom-12 -right-12 h-60 w-60 rounded-full border-[24px] border-[#d3e8d8]" /></section>
@@ -585,41 +574,173 @@ function PersistentVoiceAssistant({ trip, page, onTrip }: { trip: Trip; page: Pa
   const tripRef = useRef(trip);
   const onTripRef = useRef(onTrip);
   const appliedBriefRef = useRef('');
+  const handledHangupRef = useRef('');
+  const wasConnectedRef = useRef(false);
+  const sessionTranscriptStartRef = useRef(0);
+  const sessionBriefAppliedRef = useRef(false);
+  const wrapUpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressReconnectUntilRef = useRef(0);
+  const pendingBriefTranscriptRef = useRef('');
   const [showTranscript, setShowTranscript] = useState(false);
+  const [latestSessionSummary, setLatestSessionSummary] = useState('');
+  const [pendingBriefNeeds, setPendingBriefNeeds] = useState<string[]>([]);
   const connected = liveVoice.state === 'connected' || liveVoice.state === 'connecting' || liveVoice.state === 'waiting_for_agent';
   const micEnabled = liveVoice.isMicrophoneEnabled;
   const pageLabel: Record<Page, string> = { home: 'Trip dashboard', planner: 'Planning', checkout: 'Booking and payment', live: 'Live trip', expenses: 'Expenses and settlement', dna: 'Travel DNA' };
-  const polishedSummary = trip.briefTranscript || `You are planning a ${trip.request.duration}-day trip from ${trip.request.origin ?? 'your origin'} to ${trip.request.destination} for ${trip.request.travelers} travelers, with a total budget of $${trip.request.budget.toLocaleString()}. Priorities include ${trip.request.interests.join(', ')}${trip.request.foodPreferences.length ? `, with ${trip.request.foodPreferences.join(', ')} food preferences` : ''}.`;
+  const polishedSummary = latestSessionSummary || trip.briefTranscript || 'Your confirmed trip brief will appear here when you finish the conversation.';
+
+  const actionTripRequest = (payload: Record<string, unknown>): Partial<TripRequest> | undefined => {
+    const nested = payload.request && typeof payload.request === 'object' ? payload.request as Record<string, unknown> : payload;
+    const stringValue = (...keys: string[]) => keys.map((key) => nested[key]).find((value): value is string => typeof value === 'string' && value.trim().length > 0)?.trim();
+    const numberValue = (...keys: string[]) => {
+      const value = keys.map((key) => nested[key]).find((candidate) => typeof candidate === 'number' || (typeof candidate === 'string' && /\d/.test(candidate)));
+      if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+      if (typeof value === 'string') {
+        const parsed = Number(value.replace(/[^\d.]/g, ''));
+        return Number.isFinite(parsed) ? parsed : undefined;
+      }
+      return undefined;
+    };
+    const listValue = (...keys: string[]) => {
+      const value = keys.map((key) => nested[key]).find((candidate) => Array.isArray(candidate) || typeof candidate === 'string');
+      if (Array.isArray(value)) return value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean);
+      return typeof value === 'string' ? value.split(/,|\band\b/i).map((item) => item.trim()).filter(Boolean) : undefined;
+    };
+    const allowedInterests: Interest[] = ['culture', 'history', 'food', 'photography', 'shopping', 'nightlife', 'nature'];
+    const interests = listValue('interests', 'activities', 'places_of_interest')?.map((value) => value.toLowerCase()).filter((value): value is Interest => allowedInterests.includes(value as Interest));
+    const pace = stringValue('travelStyle', 'travel_style', 'pace');
+    const structured: Partial<TripRequest> = {
+      origin: stringValue('origin', 'origin_city'),
+      destination: stringValue('destination', 'destination_city'),
+      departureDate: stringValue('departureDate', 'departure_date'),
+      returnDate: stringValue('returnDate', 'return_date'),
+      travelers: numberValue('travelers', 'travelerCount', 'traveler_count'),
+      budget: numberValue('budget', 'totalBudget', 'total_budget'),
+      travelStyle: pace,
+      foodPreferences: listValue('foodPreferences', 'food_preferences', 'food'),
+      interests,
+    };
+    const present = Object.fromEntries(Object.entries(structured).filter(([, value]) => value !== undefined && (!Array.isArray(value) || value.length > 0))) as Partial<TripRequest>;
+    return Object.keys(present).length ? present : undefined;
+  };
 
   useEffect(() => { tripRef.current = trip; onTripRef.current = onTrip; }, [trip, onTrip]);
 
   useEffect(() => {
+    const allowExplicitConnection = () => { suppressReconnectUntilRef.current = 0; };
+    window.addEventListener('journeyos:voice-connect-requested', allowExplicitConnection);
+    return () => window.removeEventListener('journeyos:voice-connect-requested', allowExplicitConnection);
+  }, []);
+
+  // Some realtime transports briefly reconnect while a room is closing. Once
+  // a call has ended, reject those automatic reconnects; only a new mic click
+  // clears this lock and permits a fresh greeting/session.
+  useEffect(() => {
+    if (!connected || Date.now() >= suppressReconnectUntilRef.current) return;
+    void liveVoice.disconnect();
+  }, [connected, liveVoice]);
+
+  // Vocal agents should normally end their own session after an end_call tool
+  // call. This client-side guard makes explicit traveler requests deterministic
+  // even if the agent says goodbye without closing the WebRTC room.
+  useEffect(() => {
     if (!connected) return;
+    const latestUserLine = [...transcript].reverse().find((entry) => entry.role === 'user')?.text.trim() ?? '';
+    if (!latestUserLine || handledHangupRef.current === latestUserLine) return;
+    const requestedHangup = /^(?:please\s+)?(?:hang\s*up|end\s+(?:the\s+)?(?:call|conversation)|stop\s+(?:the\s+)?(?:call|conversation)|goodbye|bye(?:\s+for\s+now)?)[.!\s]*$/i.test(latestUserLine)
+      || /\b(?:you can|please|go ahead and)\s+hang\s*up\b/i.test(latestUserLine);
+    if (!requestedHangup) return;
+    handledHangupRef.current = latestUserLine;
+    suppressReconnectUntilRef.current = Date.now() + 10_000;
+    void liveVoice.disconnect();
+  }, [connected, liveVoice, transcript]);
+
+  useEffect(() => {
+    if (!connected) return;
+    const hasConfirmedBrief = Boolean(trip.briefTranscript);
     void sendAction('journeyos_context', {
       page: pageLabel[page],
-      destination: trip.request.destination,
-      origin: trip.request.origin,
-      departureDate: trip.request.departureDate,
-      returnDate: trip.request.returnDate,
-      friends: trip.travelers.map((friend) => friend.name),
-      selectedFlight: trip.flights.find((flight) => flight.selected)?.code,
-      selectedHotel: trip.hotels.find((hotel) => hotel.selected)?.name,
-      instruction: 'Use this as the current app context. Give concise help relevant to the current page and do not ask for facts already listed.',
+      tripStatus: hasConfirmedBrief ? 'confirmed-admin-brief' : 'new-unconfirmed-trip',
+      ...(hasConfirmedBrief ? {
+        destination: trip.request.destination,
+        origin: trip.request.origin,
+        departureDate: trip.request.departureDate,
+        returnDate: trip.request.returnDate,
+        durationDays: trip.request.duration,
+        friends: trip.travelers.map((friend) => friend.name),
+        selectedFlight: trip.flights.find((flight) => flight.selected)?.code,
+        selectedHotel: trip.hotels.find((hotel) => hotel.selected)?.name,
+      } : {}),
+      instruction: hasConfirmedBrief
+        ? 'Use this as confirmed app context. Give concise help relevant to the current page and do not ask for confirmed facts again. Do not repeat each answer back; confirm the complete updated request only once at the end. When the admin changes the trip, call trip_brief_ready with conversation plus origin, destination, departureDate, returnDate, travelers, budget, interests, foodPreferences, and travelStyle.'
+        : pendingBriefNeeds.length
+          ? `Continue the admin's incomplete brief. JourneyOS safely retained their prior answers. Ask only for: ${pendingBriefNeeds.join(', ')}. Acknowledge answers briefly without repeating them. Confirm the combined trip exactly once at the end, then call trip_brief_ready with conversation plus origin, destination, ISO departureDate, ISO returnDate, travelers, budget, interests, foodPreferences, and travelStyle. End gracefully. Never restart the full interview or use demo defaults.`
+          : 'This is a new admin planning conversation. Ignore all demo defaults. Before trip_brief_ready, ask for: origin city; destination city; exact departure date; exact return date; traveler count; total budget; preferred places or activities; food needs; and easy, balanced, or active pace. All are required. Ask only what is missing and never infer an answer. Do not repeat or reconfirm each response. Confirm the complete brief exactly once at the end, then call trip_brief_ready with conversation plus origin, destination, ISO departureDate, ISO returnDate, travelers, budget, interests, foodPreferences, and travelStyle. Then end gracefully.',
     });
-  }, [connected, page, sendAction, trip]);
+  }, [connected, page, pendingBriefNeeds, sendAction, trip]);
 
-  const applyBrief = async (brief: string) => {
-    if (brief.trim().length < 3 || appliedBriefRef.current === brief) return;
-    appliedBriefRef.current = brief;
+  const applyBrief = async (brief: string, structuredRequest?: Partial<TripRequest>) => {
+    const combinedBrief = [pendingBriefTranscriptRef.current, brief.trim()].filter(Boolean).join(' ');
+    if (combinedBrief.length < 3 || appliedBriefRef.current === combinedBrief) return;
+    appliedBriefRef.current = combinedBrief;
     try {
-      const response = await api.extractPlan(brief);
+      const response = await api.extractPlan(combinedBrief, tripRef.current, structuredRequest);
+      pendingBriefTranscriptRef.current = '';
+      setPendingBriefNeeds([]);
+      setLatestSessionSummary(response.summary);
       onTripRef.current(response.trip, 'Your spoken trip brief is now reflected across the plan, booking, and live trip.');
-    } catch (error) { onTripRef.current(tripRef.current, error instanceof Error ? error.message : 'Could not apply that voice brief.'); }
+    } catch (error) {
+      appliedBriefRef.current = '';
+      pendingBriefTranscriptRef.current = combinedBrief;
+      const message = error instanceof Error ? error.message : 'Could not apply that voice brief.';
+      const missing = message.match(/missing:\s*(.+?)\.\s*(?:Start|$)/i)?.[1]?.split(',').map((field) => field.trim()).filter(Boolean) ?? [];
+      setPendingBriefNeeds(missing);
+      setLatestSessionSummary(message);
+      onTripRef.current(tripRef.current, message);
+    }
   };
 
+  // At 45 seconds, ask the mediator to wrap up instead of cutting off audio.
+  // On a natural disconnect, use only this session's user transcript as a
+  // fallback when the agent did not emit trip_brief_ready.
+  useEffect(() => {
+    if (connected && !wasConnectedRef.current) {
+      wasConnectedRef.current = true;
+      sessionTranscriptStartRef.current = transcript.length;
+      sessionBriefAppliedRef.current = false;
+      setLatestSessionSummary('Listening for your new trip details…');
+      wrapUpTimerRef.current = setTimeout(() => {
+        void sendAction('journeyos_context', {
+          elapsedSeconds: 45,
+          instruction: 'Wrap up now without interrupting the traveler. Ask no new optional questions. Do not repeat individual answers. If the required brief is complete, confirm it once, call trip_brief_ready, say a short goodbye, and end_call. If required details remain, name only those missing details, preserve the partial brief, and end gracefully.',
+        });
+      }, 45_000);
+      return;
+    }
+    if (connected || !wasConnectedRef.current) return;
+    wasConnectedRef.current = false;
+    suppressReconnectUntilRef.current = Math.max(suppressReconnectUntilRef.current, Date.now() + 10_000);
+    if (wrapUpTimerRef.current) clearTimeout(wrapUpTimerRef.current);
+    wrapUpTimerRef.current = null;
+    const sessionEntries = transcript.slice(sessionTranscriptStartRef.current);
+    const spokenBrief = sessionEntries.map((entry) => `${entry.role}: ${entry.text.trim()}`).filter((entry) => entry.length > 7).join(' ');
+    if (!sessionBriefAppliedRef.current && spokenBrief.length >= 3) {
+      setLatestSessionSummary('Updating your travel brief from the completed conversation…');
+      void applyBrief(spokenBrief);
+    }
+  }, [connected, liveVoice, sendAction, transcript]);
+
+  useEffect(() => () => {
+    if (wrapUpTimerRef.current) clearTimeout(wrapUpTimerRef.current);
+  }, []);
+
   useEffect(() => onAction('trip_brief_ready', (payload) => {
-    const brief = typeof payload.conversation === 'string' ? payload.conversation : typeof payload.summary === 'string' ? payload.summary : transcript.filter((entry) => entry.role === 'user').map((entry) => entry.text).join(' ');
-    void applyBrief(brief);
+    const currentSessionTranscript = transcript.slice(sessionTranscriptStartRef.current).map((entry) => `${entry.role}: ${entry.text}`).join(' ');
+    const actionSummary = typeof payload.conversation === 'string' ? payload.conversation : typeof payload.summary === 'string' ? payload.summary : '';
+    const brief = [actionSummary, currentSessionTranscript].filter(Boolean).join(' ');
+    sessionBriefAppliedRef.current = true;
+    setLatestSessionSummary(brief);
+    void applyBrief(brief, actionTripRequest(payload));
   }), [onAction, transcript]);
 
   useEffect(() => onAction('collect_maya_preferences', () => {
@@ -634,7 +755,11 @@ function PersistentVoiceAssistant({ trip, page, onTrip }: { trip: Trip; page: Pa
       // Keep one conversation alive as the user moves between pages. A second
       // press only mutes/unmutes; ending a session is an explicit action.
       if (connected) await liveVoice.toggleMicrophone();
-      else await liveVoice.connect();
+      else {
+        suppressReconnectUntilRef.current = 0;
+        window.dispatchEvent(new Event('journeyos:voice-connect-requested'));
+        await liveVoice.connect();
+      }
     } catch (error) { onTripRef.current(tripRef.current, error instanceof Error ? error.message : 'Could not connect to the Travel Mediator.'); }
   };
 
@@ -660,6 +785,10 @@ function App() {
     try { void api.hydrateTrip(JSON.parse(saved) as Trip).then(({ trip: restored }) => setTrip(restored)).catch((error: Error) => setNotice(`Could not restore your active trip: ${error.message}`)); }
     catch { window.localStorage.removeItem('journeyos-active-trip'); void api.getDemo().then(({ trip: seeded }) => setTrip(seeded)); }
   }, []);
+
+  // A newly accepted brief creates a new itinerary. Always begin its review
+  // on Day 1 instead of retaining a day selected on the previous trip.
+  useEffect(() => { setActiveDay(1); }, [trip?.briefTranscript]);
 
   // Voice calls finish outside the browser. While one is active, periodically
   // pull the secure server-side callback result into the visible friend cards.
