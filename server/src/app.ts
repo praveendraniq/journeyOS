@@ -13,6 +13,7 @@ import { SabreService } from './services/sabre.service.js';
 import { SabreMcpService } from './services/sabre-mcp.service.js';
 import { VocalBridgeService } from './services/voice-planner.service.js';
 import { WeatherService } from './services/weather.service.js';
+import { certConfirmationPdf, type CertConfirmation } from './services/cert-confirmation-pdf.service.js';
 import type { PaymentOrder, TripEvent } from './types.js';
 
 const replanSchema = z.object({ type: z.enum(['late', 'rain', 'flight-delay', 'closed', 'tired']), activeDay: z.number().int().min(1).optional(), trip: z.unknown().optional() });
@@ -48,6 +49,7 @@ const negotiationCallbackSchema = z.object({
   itineraryChanges: z.array(negotiationItineraryChangeSchema).min(1).max(4).optional(),
   dialogue: negotiationDialogueSchema.optional(),
 });
+const explicitNegotiationAcceptance = /\b(yes|yeah|yep|okay|ok|i agree)\b/i;
 const selectionSchema = z.object({ id: z.string().min(1), trip: z.unknown().optional() });
 const progressSchema = z.object({ id: z.string().min(1).optional(), action: z.enum(['start', 'complete', 'skip', 'restore', 'delay']), actualDurationMins: z.number().int().min(1).max(720).optional(), minutes: z.number().int().min(1).max(240).optional(), trip: z.unknown().optional() });
 const itineraryCommandSchema = z.object({ query: z.string().min(2).max(500), activeDay: z.number().int().min(1), trip: z.unknown().optional() });
@@ -60,7 +62,54 @@ const orderSchema = z.object({ percentages: z.record(z.string(), z.number().min(
 const weatherSchema = z.object({ destination: z.string().min(2).max(80) });
 const voiceTokenSchema = z.object({ participant_name: z.string().min(1).max(80).optional() });
 const sabreSearchSchema = z.object({ origin: z.string().trim().length(3).toUpperCase(), destination: z.string().trim().length(3).toUpperCase(), departureDate: z.string().date(), returnDate: z.string().date(), adults: z.number().int().min(1).max(9) });
-const sabreBookingSchema = z.object({ confirmed: z.literal(true), booking: z.record(z.unknown()) });
+const sabreBookingSchema = z.object({
+  confirmed: z.literal(true),
+  revalidationId: z.string().uuid(),
+  traveler: z.object({ firstName: z.string().trim().min(2).max(60), lastName: z.string().trim().min(2).max(60), email: z.string().trim().email().max(160), phone: z.string().trim().min(7).max(30) }),
+  display: z.object({ flight: z.object({ title: z.string().min(2).max(240), detail: z.string().min(2).max(500) }), hotel: z.object({ title: z.string().min(2).max(240), detail: z.string().min(2).max(500) }) }),
+});
+const sabreRevalidationSchema = sabreSearchSchema.extend({ flightOffer: z.record(z.unknown()), hotelRate: z.record(z.unknown()) });
+
+type Revalidation = { flightOffer: Record<string, unknown>; hotelRate: Record<string, unknown>; expiresAt: number; display: { flight: { title: string; detail: string }; hotel: { title: string; detail: string } } };
+type CertBooking = CertConfirmation & { result: unknown };
+
+const mcpPayload = (value: unknown): Record<string, unknown> => {
+  const result = value as { content?: Array<{ text?: string }>; result?: { content?: Array<{ text?: string }> } };
+  const contents = result.result?.content ?? result.content ?? [];
+  for (const item of contents) {
+    if (!item.text) continue;
+    try { const parsed = JSON.parse(item.text) as Record<string, unknown>; if (parsed && typeof parsed === 'object') return parsed; }
+    catch { /* A prose MCP block may precede the structured result. */ }
+  }
+  return {};
+};
+
+const identifier = (value: Record<string, unknown>, keys: string[]): string | undefined => {
+  for (const key of keys) {
+    const direct = value[key];
+    if (typeof direct === 'string' || typeof direct === 'number') return String(direct);
+  }
+  for (const nested of Object.values(value)) {
+    if (!nested || typeof nested !== 'object' || Array.isArray(nested)) continue;
+    const match = identifier(nested as Record<string, unknown>, keys);
+    if (match) return match;
+  }
+  return undefined;
+};
+
+const sabreReference = (value: unknown): string | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  if (Array.isArray(value)) { for (const item of value) { const reference = sabreReference(item); if (reference) return reference; } return undefined; }
+  const record = value as Record<string, unknown>;
+  for (const [key, candidate] of Object.entries(record)) {
+    if (/^(pnr|recordLocator|bookingReference|confirmationNumber|confirmationCode|reservationCode)$/i.test(key) && (typeof candidate === 'string' || typeof candidate === 'number')) {
+      const reference = String(candidate).trim();
+      if (reference) return reference;
+    }
+  }
+  for (const candidate of Object.values(record)) { const reference = sabreReference(candidate); if (reference) return reference; }
+  return undefined;
+};
 
 const polishedTripBrief = (request: { origin?: string; destination: string; departureDate?: string; returnDate?: string; duration: number; travelers: number; budget: number; interests: string[]; foodPreferences: string[]; travelStyle: string }) => {
   const dates = request.departureDate && request.returnDate ? ` between ${request.departureDate} and ${request.returnDate}` : '';
@@ -82,36 +131,52 @@ export const createApp = () => {
   const routes = new GoogleRoutesService();
   const weather = new WeatherService();
   const orders = new Map<string, PaymentOrder>();
+  const sabreRevalidations = new Map<string, Revalidation>();
+  const certBookings = new Map<string, CertBooking>();
   const app = express();
 
   app.use(cors({ origin: config.clientOrigin }));
   app.use(express.json({ limit: '1mb' }));
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, mockMode: config.mockMode }));
+  const issueVoiceToken = async (req: express.Request, res: express.Response, requestedAgent: 'main' | 'maya' | 'booking') => {
+    const { participant_name } = voiceTokenSchema.parse(req.body ?? {});
+    const voiceAgent = requestedAgent === 'booking'
+      // A Vocal Bridge account API key is authorized to mint web tokens for
+      // any agent selected by X-Agent-Id. Agent-scoped keys can be rejected
+      // by this endpoint, so Booking intentionally uses the proven account
+      // key while keeping a distinct booking agent ID.
+      ? { label: 'booking agent', id: config.vocalBridge.bookingAgentId, apiKey: config.vocalBridge.apiKey, participantName: 'Odyssey booking traveler' }
+      : requestedAgent === 'maya'
+        ? { label: 'Maya agent', id: config.vocalBridge.mayaAgentId, apiKey: config.vocalBridge.mayaApiKey || config.vocalBridge.apiKey, participantName: 'Maya traveler agent' }
+        : { label: 'agent', id: config.vocalBridge.agentId, apiKey: config.vocalBridge.apiKey, participantName: 'Odyssey traveler' };
+    if (!voiceAgent.apiKey || !voiceAgent.id) return res.status(503).json({ error: `Vocal Bridge ${voiceAgent.label} is not configured on the server.` });
+    const baseUrl = (config.vocalBridge.baseUrl || 'https://vocalbridgeai.com').replace(/\/$/, '');
+    const response = await fetch(`${baseUrl}/api/v1/token`, {
+      method: 'POST',
+      headers: {
+        'X-API-Key': voiceAgent.apiKey,
+        'X-Agent-Id': voiceAgent.id,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ participant_name: participant_name ?? voiceAgent.participantName }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = typeof body === 'object' && body && 'error' in body ? String(body.error) : `Vocal Bridge returned ${response.status}`;
+      return res.status(response.status).json({ error: detail });
+    }
+    return res.json(body);
+  };
   app.post('/api/voice-token', async (req, res, next) => {
     try {
-      const { participant_name } = voiceTokenSchema.parse(req.body ?? {});
-      const isMayaSession = req.query.agent === 'maya';
-      const agentId = isMayaSession ? config.vocalBridge.mayaAgentId : config.vocalBridge.agentId;
-      const apiKey = isMayaSession ? (config.vocalBridge.mayaApiKey ?? config.vocalBridge.apiKey) : config.vocalBridge.apiKey;
-      if (!apiKey || !agentId) return res.status(503).json({ error: `Vocal Bridge ${isMayaSession ? 'Maya agent' : 'agent'} is not configured on the server.` });
-      const baseUrl = (config.vocalBridge.baseUrl || 'https://vocalbridgeai.com').replace(/\/$/, '');
-      const response = await fetch(`${baseUrl}/api/v1/token`, {
-        method: 'POST',
-        headers: {
-          'X-API-Key': apiKey,
-          'X-Agent-Id': agentId,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ participant_name: participant_name ?? (isMayaSession ? 'Maya traveler agent' : 'JourneyOS traveler') }),
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const detail = typeof body === 'object' && body && 'error' in body ? String(body.error) : `Vocal Bridge returned ${response.status}`;
-        return res.status(response.status).json({ error: detail });
-      }
-      return res.json(body);
+      const requestedAgent = req.query.agent === 'booking' ? 'booking' : req.query.agent === 'maya' ? 'maya' : 'main';
+      return await issueVoiceToken(req, res, requestedAgent);
     } catch (error) { next(error); }
+  });
+  app.post('/api/booking-voice-token', async (req, res, next) => {
+    try { return await issueVoiceToken(req, res, 'booking'); }
+    catch (error) { next(error); }
   });
   app.get('/api/voice/outbound-context', (req, res) => {
     const suppliedSecret = req.header('X-JourneyOS-Context-Key');
@@ -119,6 +184,7 @@ export const createApp = () => {
     const trip = store.getTrip();
     const session = trip.preferenceCollection?.agreement;
     res.json({
+      mode: session ? 'FRIEND_NEGOTIATION_CALL' : 'FRIEND_PREFERENCE_CALL',
       admin: trip.travelers[0]?.name ?? 'Trip admin',
       trip: {
         origin: trip.request.origin,
@@ -135,7 +201,7 @@ export const createApp = () => {
       negotiationSession: session ? { travelerId: session.travelerId, travelerName: session.travelerName, affectedDayHint: session.affectedDay, phase: 'discover-live-preference' } : undefined,
       knownProfiles: trip.preferenceCollection?.calls.filter((call) => call.status === 'completed').map((call) => ({ travelerId: call.travelerId, name: call.name, topPriorities: call.topPriorities, summary: call.summary })) ?? [],
       instruction: session
-        ? `Do not assume a conflict. First ask ${session.travelerName} for the one thing that matters most or one constraint. Compare the live answer against the supplied traveler profiles. If a real conflict exists, name it, explain why, generate a specific compromise, and seek explicit agreement. Submit the discovered preference, conflict, rationale, proposal, counterpart, affected day, agreed changes, itinerary changes, and dialogue to the secured callback.`
+        ? `This is an AI Travel Negotiator call. Do not ask for trip basics or run a survey. First ask ${session.travelerName} for the one thing that matters most, then wait. Treat the admin as the primary anchor; a matching knownProfiles preference strengthens that anchor. When a live request competes with an anchor, food/pace constraint, budget, or shared time window: acknowledge the request, name the anchor and its owner, explain the practical contradiction, offer exactly one concrete trade, ask “Would that work for you?”, then stop speaking. Do not accept, save, or close until the friend explicitly says yes, okay, I agree, or I can adjust. If the friend says no, offer one alternative and wait. If they still decline, save the unresolved result as accepted false. For Dallas late dinner, nightlife, or live music against Sarah’s early pescetarian dinner, offer shared dinner around six followed by optional live music. Never claim the itinerary changed. Submit the actual dialogue and structured result to the secured callback.`
         : 'Use this as established context. Do not ask the callee to repeat known facts. Collect a concise personal priority or constraint for later comparison.',
     });
   });
@@ -252,19 +318,19 @@ export const createApp = () => {
     try { const input = preferenceDecisionSchema.parse(req.body); if (input.trip) store.hydrate(input.trip as ReturnType<typeof store.getTrip>); res.json({ trip: store.applyPreferenceDecision(input.interestScores as ReturnType<typeof store.getTrip>['groupPreference']['interestScores']) }); }
     catch (error) { next(error); }
   });
-  app.post('/api/planner/simulate-prabhu-interview', (req, res, next) => {
+  app.post('/api/planner/simulate-sarah-interview', (req, res, next) => {
     try {
       const { trip } = simulatedInterviewSchema.parse(req.body);
       if (trip) store.hydrate(trip as ReturnType<typeof store.getTrip>);
       res.json({ trip: store.completeSimulatedMayaInterview(), summary: 'Maya’s preference conflicts with the culture-heavy Day 2. I kept the family shrine, added Akihabara, and moved the early activity later. Maya’s satisfaction rises from 42% to 81% while every traveler stays above 72%.' });
     } catch (error) { next(error); }
   });
-  app.post('/api/planner/call-prabhu', async (req, res, next) => {
+  app.post('/api/planner/call-sarah', async (req, res, next) => {
     try {
       const { trip } = simulatedInterviewSchema.parse(req.body);
       if (trip) store.hydrate(trip as ReturnType<typeof store.getTrip>);
-      await planner.callPrabhuAgent();
-      res.json({ trip: store.startPrabhuPreferenceCall() });
+      await planner.callSarahAgent();
+      res.json({ trip: store.startSarahPreferenceCall() });
     } catch (error) { next(error); }
   });
 
@@ -283,12 +349,91 @@ export const createApp = () => {
       res.json({ source: 'sabre-cert-mcp', results });
     } catch (error) { next(error); }
   });
+  app.post('/api/sabre/revalidate', async (req, res, next) => {
+    try {
+      const input = sabreRevalidationSchema.parse(req.body);
+      const fresh = await sabreMcp.revalidateTrip(input);
+      const flightData = mcpPayload(fresh.flights);
+      const hotelData = mcpPayload(fresh.hotels);
+      const flightId = identifier(input.flightOffer, ['id', 'offerId', 'offerItemId']);
+      const hotelRateId = identifier(input.hotelRate, ['rateKey', 'rateId', 'ratePlanCode', 'id', 'hotelCode']);
+      const freshFlights = Array.isArray(flightData.offers) ? flightData.offers : [];
+      const freshHotels = Array.isArray(hotelData.hotels) ? hotelData.hotels : [];
+      const freshFlight = freshFlights.find((item) => item && typeof item === 'object' && identifier(item as Record<string, unknown>, ['id', 'offerId', 'offerItemId']) === flightId) as Record<string, unknown> | undefined;
+      const freshHotel = freshHotels.find((item) => item && typeof item === 'object' && identifier(item as Record<string, unknown>, ['rateKey', 'rateId', 'ratePlanCode', 'id', 'hotelCode']) === hotelRateId) as Record<string, unknown> | undefined;
+      if (!flightId || !hotelRateId || !freshFlight || !freshHotel) {
+        return res.status(409).json({ error: 'The selected CERT offer or hotel rate changed. Refresh Sabre inventory and select a fresh live bundle before attempting a test booking.' });
+      }
+      const revalidationId = crypto.randomUUID();
+      sabreRevalidations.set(revalidationId, {
+        flightOffer: freshFlight,
+        hotelRate: freshHotel,
+        expiresAt: Date.now() + 10 * 60_000,
+        display: {
+          flight: { title: String(req.body.display?.flight?.title ?? 'Selected Sabre CERT flight'), detail: String(req.body.display?.flight?.detail ?? '') },
+          hotel: { title: String(req.body.display?.hotel?.title ?? 'Selected Sabre CERT hotel'), detail: String(req.body.display?.hotel?.detail ?? '') },
+        },
+      });
+      res.json({ source: 'sabre-cert-mcp', revalidationId, expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(), message: 'Fresh Sabre CERT flight offer and hotel rate found. You may now submit one explicit CERT test-booking request.' });
+    } catch (error) { next(error); }
+  });
   app.post('/api/sabre/create-booking', async (req, res, next) => {
     try {
-      const { booking } = sabreBookingSchema.parse(req.body);
-      const result = await sabreMcp.createBooking(booking);
-      res.status(201).json({ source: 'sabre-cert-mcp', result });
+      const input = sabreBookingSchema.parse(req.body);
+      const revalidation = sabreRevalidations.get(input.revalidationId);
+      if (!revalidation || revalidation.expiresAt <= Date.now()) {
+        sabreRevalidations.delete(input.revalidationId);
+        return res.status(409).json({ error: 'The CERT revalidation expired. Revalidate the selected offer and rate again before creating a test booking.' });
+      }
+      // Preserve the fresh opaque MCP response. The create-booking skill owns
+      // the supplier-specific mapping; the browser never fabricates keys.
+      const result = await sabreMcp.createBooking({
+        flightOffer: revalidation.flightOffer,
+        hotelRate: revalidation.hotelRate,
+        travelers: [{
+          firstName: input.traveler.firstName,
+          lastName: input.traveler.lastName,
+          email: input.traveler.email,
+          phone: input.traveler.phone,
+        }],
+        contact: input.traveler,
+      });
+      const reference = sabreReference(result);
+      if (!reference) {
+        return res.status(202).json({
+          source: 'sabre-cert-mcp',
+          status: 'pending',
+          result,
+          message: 'Sabre did not return a PNR or booking reference. Payment remains recorded and supplier fulfillment remains pending; no confirmation PDF was created.',
+        });
+      }
+      const bookingId = crypto.randomUUID();
+      const confirmation: CertBooking = {
+        bookingId,
+        reference,
+        createdAt: new Date().toISOString(),
+        traveler: { firstName: input.traveler.firstName, lastName: input.traveler.lastName },
+        flight: revalidation.display.flight,
+        hotel: revalidation.display.hotel,
+        result,
+      };
+      certBookings.set(bookingId, confirmation);
+      sabreRevalidations.delete(input.revalidationId);
+      res.status(201).json({
+        source: 'sabre-cert-mcp',
+        status: 'confirmed',
+        booking: { bookingId, reference, createdAt: confirmation.createdAt },
+        message: 'Sabre CERT returned a booking reference. This is a test booking and is not valid for travel.',
+      });
     } catch (error) { next(error); }
+  });
+  app.get('/api/sabre/cert-bookings/:bookingId/confirmation.pdf', (req, res) => {
+    const booking = certBookings.get(req.params.bookingId);
+    if (!booking) return res.status(404).json({ error: 'CERT test booking confirmation not found.' });
+    const pdf = certConfirmationPdf(booking);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="odyssey-cert-test-booking-${booking.reference.replace(/[^A-Za-z0-9_-]/g, '') || booking.bookingId}.pdf"`);
+    res.send(pdf);
   });
   app.post('/api/bookings/flight', (req, res, next) => {
     try { const input = selectionSchema.parse(req.body); if (input.trip) store.hydrate(input.trip as ReturnType<typeof store.getTrip>); res.json({ trip: store.selectFlight(input.id) }); }
@@ -324,7 +469,11 @@ export const createApp = () => {
       const suppliedSecret = req.header('X-JourneyOS-Context-Key');
       if (!config.vocalBridge.outboundContextSecret || suppliedSecret !== config.vocalBridge.outboundContextSecret) return res.status(401).json({ error: 'Unauthorized negotiation callback.' });
       const source = req.body && Object.keys(req.body).length ? req.body : req.query;
-      return res.json({ trip: store.completeNegotiation(negotiationCallbackSchema.parse(source)) });
+      const input = negotiationCallbackSchema.parse(source);
+      if (input.accepted && !explicitNegotiationAcceptance.test(input.travelerResponse)) {
+        return res.status(400).json({ error: 'An accepted negotiation requires the friend’s explicit spoken yes or okay in travelerResponse.' });
+      }
+      return res.json({ trip: store.completeNegotiation(input) });
     } catch (error) { next(error); }
   });
 

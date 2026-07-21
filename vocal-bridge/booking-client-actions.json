@@ -1,0 +1,23 @@
+[
+  {
+    "name": "journeyos_context",
+    "description": "Odyssey supplies the active booking page, trip details, selected flight, selected hotel, total, and safety boundaries. Treat it as authoritative.",
+    "direction": "app_to_agent",
+    "behavior": "notify"
+  },
+  {
+    "name": "select_bundle",
+    "description": "Select a curated package only after explicit traveler choice. Payload field id must be exactly value, overall, or neighborhood.",
+    "direction": "agent_to_app"
+  },
+  {
+    "name": "confirm_booking",
+    "description": "Open the admin payment review only after the traveler explicitly confirms the selected package. This does not submit a Sabre booking.",
+    "direction": "agent_to_app"
+  },
+  {
+    "name": "collect_payment",
+    "description": "Prepare an Odyssey PayPal Sandbox admin-advance order only after the traveler explicitly asks to pay. It does not book a supplier or collect card details by voice.",
+    "direction": "agent_to_app"
+  }
+]

@@ -1,6 +1,6 @@
 # JourneyOS — Project Context and Handoff
 
-Last updated: July 18, 2026
+Last updated: July 21, 2026
 
 ## Context maintenance policy
 
@@ -39,7 +39,7 @@ Current Git publication:
 
 - Working branch: `agent/live-trip-planning`
 - User fork: `praveendraniq/journeyOS`
-- The partner branch `hemalekamohanram/journeyOS:codex/journeyos-demo-ready` was inspected and selectively reconciled on July 18, 2026. The current tree includes its dynamic negotiation concept, page-aware Live Trip voice commands, and Maps JavaScript route rendering while preserving the newer structured voice brief, explicit `server/.env` loading, friend validation/callbacks, selected-hotel map anchoring, and Sabre authentication behavior.
+- The partner branch `hemalekamohanram/journeyOS:codex/journeyos-demo-ready` was inspected and selectively reconciled against the live demo branch. The current tree keeps its dynamic negotiation concept, page-aware Live Trip voice commands, and Maps JavaScript route rendering while preserving the newer structured voice brief, explicit `server/.env` loading, friend validation/callbacks, selected-hotel map anchoring, and Sabre authentication behavior.
 
 ## Local development
 
@@ -259,11 +259,9 @@ Important context:
 - Keep the agent network concept, but do not expose a redundant standalone agent screen.
 - Voice should feel continuous across pages while maintaining confirmed context.
 - The checked-in Vocal Bridge prompt consolidates the proven Travel Mediator rules with the partner's page-aware Concierge and AI Travel Negotiator flow. It supports four explicit modes: admin planning, short friend preference calls, friend negotiation calls, and page assistance. It preserves strict city/date/brief validation, partial-brief recovery, silent HTTP callback saving, graceful hang-up behavior, authoritative `journeyos_context`, and `show_day` requests such as “show Day 3.”
-- Negotiation demo sequence: the admin's live brief and Sarah's seeded profile are preloaded, then the Negotiator calls Friend 2 (when a third traveler exists). It detects a conflict only from Friend 2's spoken priority, proposes a specific trade, requires explicit acceptance, and leaves the itinerary unchanged until the admin applies the agreement.
-- Trip Dashboard now makes the collection state explicit: the admin and Sarah show `Brief captured` from the outset, while Friend 2 remains `Awaiting Friend 2 call` (or in-progress) until the live negotiation callback supplies their actual call result.
-- Sarah's Planning card also has an unconditional seeded profile fallback for older locally persisted trips: early dinner, moderate walking, pescetarian food, and the corresponding early-dinner/easy-transit compromise.
-- The Group Vibe view (`Does this plan feel good for everyone?`) follows the same state model: Admin and Sarah are marked `Brief captured`; Sarah visibly displays early dinner, moderate walking, pescetarian food, and keeps late dinner light. Friend 2 alone remains pending until their call result is received.
-- Sarah's preferences are now defined as one canonical client profile and normalized server-side on hydration, preventing old locally persisted values from producing inconsistent Sarah cards across Planning, Dashboard, Group Vibe, and Negotiation context.
+- Negotiation demo sequence: Hema's live admin brief and Sarah's seeded Friend 1 profile are preloaded, then the Negotiator calls Friend 2 (when a third traveler exists). It detects a conflict only from Friend 2's spoken priority, proposes a specific trade, requires explicit acceptance, and leaves the itinerary unchanged until the admin applies the agreement.
+- Trip Dashboard now makes the collection state explicit: Hema and Sarah show `Brief captured` from the outset, while Friend 2 remains `Awaiting Friend 2 call` (or in-progress) until the live negotiation callback supplies their actual call result.
+- Sarah's Planning card uses the canonical seeded profile: early dinner, moderate walking, pescetarian food, and the corresponding early-dinner/easy-transit compromise. The profile is shared by Planning, Dashboard, Group Vibe, and Negotiation context.
 - Sabre CERT search confirmation is now an in-app panel in Booking rather than a browser `window.confirm` dialog. It names the exact route, confirms that CERT inventory is reference-only, and provides explicit Search / Not now actions.
 - After the admin’s sandbox advance is captured, Booking now offers `Prepare payment requests`: it creates each non-admin friend’s separate PayPal sandbox link and message preview, then enables `Copy payment messages`. No SMS, email, or payment request is automatically sent. The verbose Supplier fulfillment panel was replaced by one concise sandbox/supplier-booking note.
 - The same batch action is also placed immediately below `Reset to equal shares` in Step 2 as `Collect payment from friends`, making the next admin action visible alongside the individual split amounts.
@@ -284,7 +282,13 @@ Important context:
 - Negotiation outbound calls automatically switch to the labeled scripted flow when Vocal Bridge credentials, CLI execution, or outbound quota are unavailable; disruption controls remain connected to the active-day replan API.
 - Live itinerary layout order is: journey map and timeline, Live activity progress, disruption controls, then the Why this order works before/optimised comparison at the bottom.
 - Booking and payment should remain minimal and voice-driven.
-- New trips start with two populated defaults: admin Prabhu Siddharth (`+14156290471`) and friend Sarah (`+14152220000`). Sarah is the visible example profile: early dinner, moderate walking, and pescetarian food. A four-traveler request therefore creates the two defaults plus editable Friend 2 and Friend 3 slots.
+- New trips start with two populated defaults: admin Hema (`+14152220000`) and Friend 1 Sarah Siddharth (`+14156290471`). Sarah is the visible example profile: early dinner, moderate walking, and pescetarian food. A four-traveler request therefore creates the two defaults plus editable Friend 2 and Friend 3 slots.
+- On Plan Together, the large voice control ends the Vocal Bridge session when pressed during an active conversation; the explicit `End voice chat` button provides the same action. The persistent page voice sends authoritative `journeyos_context` (page, polished brief, dates, interests, food needs, roster, selected booking, and active day) after every page change while connected. The former sticky American Airlines savings alert was removed.
+- Plan Together starts with an empty editable brief when no voice or saved brief exists. The microphone-preview fallback no longer inserts a Tokyo demo request.
+- The global voice dock, including its transcript panel and End call control, is visible on Plan Together as well as every other page. Negotiation consent details mirror Friend 2's in-progress Friends-card edits and reset consent whenever its name or phone changes; starting the call persists those edits first.
+- Hydration migrates the legacy seeded `t-sarah` roster entry to Friend 1 Sarah and the old default Sarah admin to Hema, so existing browser-stored demo state updates automatically.
+- The checked-in Vocal Bridge negotiator prompt includes a Dallas-only detailed live-music/timing playbook: a live-music, nightlife, late-evening, or late-dinner request is treated as a material conflict with Sarah's early vegetarian dinner constraint. It offers a 6 PM shared dinner plus optional live music, then pauses for an explicit response before saving the negotiated outcome.
+- Starting a negotiation now preserves existing completed preference-call details in `knownProfiles` instead of replacing them with generic interest tags. The outbound context explicitly identifies `FRIEND_NEGOTIATION_CALL` mode and supplies the Dallas live-music/early-vegetarian-dinner trade when that scenario applies.
 - Live Trip should show real preference-aware daily stops and mapped directions.
 - Day 1 is selected whenever a newly accepted trip brief creates an itinerary.
 - Avoid redundant cards and repeated trip information.
@@ -296,11 +300,12 @@ Important context:
 
 ## Current validation status
 
-At the time this handoff was written:
+At the time this handoff was last updated:
 
 ```text
-npm run build  — passed
-npm test       — 22 tests passed
+npm --prefix client run build  — passed
+npm --prefix server run build  — passed
+npm test                     — 29 tests passed
 ```
 
 The test suite includes regression coverage for:
@@ -359,6 +364,23 @@ Booking now starts the required Sabre CERT request automatically on page entry, 
 
 When a returned American Airlines CERT offer is genuinely lower than the comparable curated AA demo-flight component, Booking retains a prominent sticky in-section alert with the calculated group saving. The alert clears when the route/dates/group changes or a fresh search begins; it is never shown for a fabricated saving.
 
+After the admin payment is captured, Booking shows an optional Sabre CERT test-booking card and auto-scrolls to the supplier-fulfillment section. If PayPal capture fails or does not return `COMPLETED`, the PayPal card displays that result inline and keeps supplier fulfillment locked. The safe demo flow is search live CERT inventory, select a live bundle, revalidate the selected flight offer and hotel rate, submit one explicit CERT test-booking request with test traveler details, and generate an Odyssey PDF only when Sabre returns a PNR/reference. The generated PDF is labelled **SABRE CERT TEST BOOKING - NOT VALID FOR TRAVEL**. If Sabre does not return a PNR/reference, Odyssey keeps the truthful state **Payment recorded; supplier fulfillment pending** and does not create a confirmation PDF.
+
 ## Brand asset
 
 `client/public/odyssey-logo.png` is the generated Odyssey.AI compass/O mark with a transparent background. It replaces the sidebar’s textual `O` and is configured as the browser favicon in `client/index.html`.
+# Negotiation reliability update — 2026-07-18
+
+- The temporary in-app “Generate a fair trade” and manual acceptance workflow was removed. Negotiation is voice-agent-driven: Vocal Bridge speaks the comparison and records the final accepted/declined outcome through the secured callback.
+- Dallas evening requests such as late dinner, live music, nightlife, or going out are compared against Sarah’s saved early pescetarian-friendly dinner profile. The concrete demo trade is dinner together at 18:00 followed by optional live music.
+- Vocal Bridge remains the voice transport and can still post a completed result through the secured callback. The app is now the authority for conflict detection, acceptance state, and admin application.
+- The Negotiator screen is voice-only: it no longer exposes manual priority or acceptance inputs. It waits for the outbound Vocal Bridge agent to complete the spoken negotiation and post the secured result; the admin’s only UI action is applying an accepted agreement.
+- The Vocal Bridge Negotiator prompt now requires a clear contradiction highlight: caller priority, counterpart’s confirmed need, practical consequence, then exactly one concrete trade before seeking an explicit spoken decision.
+- The Vocal Bridge system prompt was rewritten from scratch on July 19: concise mode-specific instructions, admin-first group anchors, matching prior-friend preferences as reinforcement, one-question friend interviews, strict spoken acceptance, one alternative on refusal, and a non-pressuring unresolved-result path.
+- Booking payment success now includes an explicit fulfillment card: selected flight and hotel, PayPal Sandbox admin-advance status, and a truthful “Pending — Sabre booking not yet submitted” supplier status. It never implies airline or hotel confirmation before a real Sabre booking response.
+- Negotiation acceptance is now hard-gated: after a trade, the agent must wait for a friend’s clear “yes,” “okay,” or equivalent. The backend rejects an `accepted: true` callback when `travelerResponse` lacks that explicit affirmative.
+- Outbound Vocal Bridge calls now run `vb agent use $VOCAL_BRIDGE_AGENT_ID` immediately before dialing. The CLI otherwise uses whichever agent was previously selected, which could silently route negotiations to an outdated prompt.
+- Booking has a separate, server-tokenized Vocal Bridge session at `/api/voice-token?agent=booking`. Its `VOCAL_BRIDGE_BOOKING_AGENT_ID` and optional agent-scoped `VOCAL_BRIDGE_BOOKING_AGENT_API_KEY` remain in `server/.env`; they are never sent to the browser. The Booking Agent receives only the active booking context and may select a curated package, open the payment step, or prepare a PayPal Sandbox order through configured client actions. It must never claim a Sabre booking, supplier confirmation, or actual payment capture without an explicit app result.
+- The Booking Agent token route intentionally always uses the working account-level `VOCAL_BRIDGE_API_KEY` with the separate booking agent ID. The optional booking agent key is not used for web-token minting because Vocal Bridge can reject agent-scoped keys on that endpoint.
+- Book & Split intentionally hides the global Planner voice dock and shows only the separate Booking Agent control, preventing users from accidentally opening the Planner Agent when they mean to review flight, hotel, and payment choices. Its dedicated token route is `/api/booking-voice-token`.
+- Starting the Booking Agent now dispatches a handoff event that disconnects any active Planner Agent conversation before minting the separate booking voice session. The Planner controller stays mounted but hidden on Book & Split solely to guarantee that clean handoff.

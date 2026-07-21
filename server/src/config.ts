@@ -36,9 +36,12 @@ export const config = {
   },
   vocalBridge: {
     apiKey: process.env.VOCAL_BRIDGE_API_KEY,
+    bookingApiKey: process.env.VOCAL_BRIDGE_BOOKING_AGENT_API_KEY,
     mayaApiKey: process.env.VOCAL_BRIDGE_MAYA_API_KEY,
     baseUrl: process.env.VOCAL_BRIDGE_API_URL ?? process.env.VOCAL_BRIDGE_BASE_URL,
     agentId: process.env.VOCAL_BRIDGE_AGENT_ID,
+    bookingAgentId: process.env.VOCAL_BRIDGE_BOOKING_AGENT_ID,
+    bookingAgentPhone: process.env.VOCAL_BRIDGE_BOOKING_AGENT_PHONE,
     mayaAgentId: process.env.VOCAL_BRIDGE_MAYA_AGENT_ID ?? '8461e8c8-6b94-42c7-bc4b-dbe48d25e700',
     mayaPhone: process.env.VOCAL_BRIDGE_MAYA_PHONE ?? '+12403781801',
     // Prefer the documented outbound callback secret name. Keep the original

@@ -1,4 +1,4 @@
-/** Canonical seeded profile used everywhere Sarah appears in the demo. */
+/** Canonical seeded profile used everywhere Friend 1 appears in the demo. */
 export const SARAH_PROFILE = {
   travelerId: 't-sarah',
   pace: 'Moderate walking',
