@@ -7,15 +7,15 @@ const interests = (scores: Partial<Record<Interest, number>>): Record<Interest, 
 });
 
 const travelers: Traveler[] = [
-  { id: 't-admin', name: 'Prabhu Siddharth', initials: 'PS', phone: '+14156290471', budgetPreference: 'balanced', activityLevel: 3, pacePreference: 'balanced', foodPreference: 'Preferences from your brief', interests: interests({ food: 5, culture: 4, photography: 3 }) },
-  { id: 't-sarah', name: 'Sarah', initials: 'SA', phone: '+14152220000', budgetPreference: 'balanced', activityLevel: 3, pacePreference: 'balanced', foodPreference: 'Pescetarian food · early dinner', interests: interests({ food: 5, photography: 4, shopping: 4, nature: 3 }) },
+  { id: 't-admin', name: 'Hema', initials: 'HE', phone: '+14152220000', budgetPreference: 'balanced', activityLevel: 3, pacePreference: 'balanced', foodPreference: 'Preferences from your brief', interests: interests({ food: 5, culture: 4, photography: 3 }) },
+  { id: 't-prabhu', name: 'Prabhu Siddharth', initials: 'PS', phone: '+14156290471', budgetPreference: 'balanced', activityLevel: 3, pacePreference: 'balanced', foodPreference: 'Pescetarian food · early dinner', interests: interests({ food: 5, photography: 4, shopping: 4, nature: 3 }) },
 ];
 const DEFAULT_FRIEND = travelers[1];
-const defaultSarahPreference = (): PreferenceCollection => ({
-  adminName: 'Prabhu Siddharth', adminWeight: 1.5, source: 'mock', status: 'pending',
-  calls: [{ travelerId: 't-sarah', name: 'Sarah', phone: '+14152220000', status: 'completed', happiness: 82, topPriorities: ['Early dinner', 'Moderate walking', 'Pescetarian food'], summary: 'Sarah prefers an early dinner, moderate walking, and pescetarian food.', compromise: 'Schedule a shared early dinner, then make any late-night activity optional.' }],
-  negotiation: 'Sarah’s example preferences are ready for the group plan.',
-  approvalSummary: 'Example preference profile loaded for Sarah.',
+const defaultPrabhuPreference = (): PreferenceCollection => ({
+  adminName: 'Hema', adminWeight: 1.5, source: 'mock', status: 'pending',
+  calls: [{ travelerId: 't-prabhu', name: 'Prabhu Siddharth', phone: '+14156290471', status: 'completed', happiness: 82, topPriorities: ['Early dinner', 'Moderate walking', 'Pescetarian food'], summary: 'Prabhu prefers an early dinner, moderate walking, and pescetarian food.', compromise: 'Schedule a shared early dinner, then make any late-night activity optional.' }],
+  negotiation: 'Prabhu’s example preferences are ready for the group plan.',
+  approvalSummary: 'Example preference profile loaded for Prabhu.',
 });
 
 const route = (id: string, day: number, time: string, title: string, subtitle: string, category: ItineraryItem['category'], x: number, y: number, durationMins: number, travelMins: number, status: ItineraryItem['status'], weatherSensitive = false): ItineraryItem => ({
@@ -27,7 +27,7 @@ const NEGOTIATION_POLICY = { minimumFitGain: 5, maximumFit: 96 } as const;
 const interestLabel = (interest: Interest) => interest.replace(/\b\w/g, (letter) => letter.toUpperCase());
 const timeFromMinutes = (minutes: number) => `${String(Math.floor(minutes / 60) % 24).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 const minutesFromTime = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
-const DEFAULT_ADMIN = { name: 'Prabhu Siddharth', phone: '+14156290471' };
+const DEFAULT_ADMIN = { name: 'Hema', phone: '+14152220000' };
 const adminFromBrief = (brief: string | undefined, request: Trip['request']): Traveler => {
   const nameMatch = brief?.match(/(?:my name is|i am|i'm)\s+([a-z][a-z '-]{1,50})(?=[,.]|\s+(?:and|from|with|for|my|i)|$)/i)?.[1]?.trim();
   const phoneMatch = brief?.match(/(?:my (?:phone|number) is|call me at|my phone number is)\s*(\+?[\d().\s-]{7,})/i)?.[1];
@@ -177,7 +177,7 @@ const itineraryFromPlaces = (destination: string, duration: number, places: Plac
 const groupPreference: GroupPreference = {
   interestScores: { culture: 4.75, history: 3.5, food: 4.25, photography: 3.5, shopping: 2, nightlife: 2.25, nature: 3.25 },
   recommendedPace: 'Balanced discovery',
-  explanation: 'The route balances Prabhu’s food and culture priorities with Sarah’s local-food, photography, and shopping interests.',
+  explanation: 'The route balances Hema’s food and culture priorities with Prabhu’s local-food, photography, and shopping interests.',
 };
 
 export class DemoStore {
@@ -206,7 +206,7 @@ export class DemoStore {
       events: [],
       progress: 28,
       progressState: { completionPercent: 23, scheduleVarianceMins: 0, completedStopIds: ['i-hotel', 'i-sensoji', 'i-izakaya'], skippedStopIds: [] },
-      preferenceCollection: defaultSarahPreference(),
+      preferenceCollection: defaultPrabhuPreference(),
     };
   }
 
@@ -222,13 +222,39 @@ export class DemoStore {
     migrated.request.returnDate ??= '2026-10-16';
     const normalizedDates = normalizedTripDates(migrated.request.departureDate, migrated.request.returnDate, migrated.request.duration);
     migrated.request = { ...migrated.request, ...normalizedDates };
-    const sarah = migrated.travelers.find((traveler) => traveler.id === 't-sarah');
-    if (sarah) Object.assign(sarah, structuredClone(DEFAULT_FRIEND));
-    if (migrated.preferenceCollection && sarah) {
-      const canonicalSarahCall = defaultSarahPreference().calls[0];
-      const sarahCall = migrated.preferenceCollection.calls.find((call) => call.travelerId === 't-sarah');
-      if (sarahCall) Object.assign(sarahCall, canonicalSarahCall);
-      else migrated.preferenceCollection.calls.unshift(canonicalSarahCall);
+
+    // Browser storage may still contain the former default roster. Those IDs
+    // identify seeded demo data (not a user-created Sarah), so migrate them
+    // in place before the app renders the consent card.
+    const legacyFriend = migrated.travelers.find((traveler) => traveler.id === 't-sarah');
+    if (legacyFriend) {
+      Object.assign(legacyFriend, structuredClone(DEFAULT_FRIEND));
+      const legacyAdmin = migrated.travelers.find((traveler) => traveler.id === 't-admin');
+      if (legacyAdmin?.name === 'Prabhu Siddharth') {
+        legacyAdmin.name = DEFAULT_ADMIN.name;
+        legacyAdmin.phone = DEFAULT_ADMIN.phone;
+        legacyAdmin.initials = 'HE';
+      }
+      if (migrated.preferenceCollection) {
+        migrated.preferenceCollection.adminName = legacyAdmin?.name ?? DEFAULT_ADMIN.name;
+        migrated.preferenceCollection.calls = migrated.preferenceCollection.calls.map((call) => call.travelerId === 't-sarah'
+          ? { ...call, ...defaultPrabhuPreference().calls[0] }
+          : call,
+        );
+        const agreement = migrated.preferenceCollection.agreement;
+        if (agreement?.counterpartId === 't-sarah') {
+          agreement.counterpartId = 't-prabhu';
+          agreement.counterpartName = DEFAULT_FRIEND.name;
+        }
+      }
+    }
+    const prabhu = migrated.travelers.find((traveler) => traveler.id === 't-prabhu');
+    if (prabhu) Object.assign(prabhu, structuredClone(DEFAULT_FRIEND));
+    if (migrated.preferenceCollection && prabhu) {
+      const canonicalPrabhuCall = defaultPrabhuPreference().calls[0];
+      const prabhuCall = migrated.preferenceCollection.calls.find((call) => call.travelerId === 't-prabhu');
+      if (prabhuCall) Object.assign(prabhuCall, canonicalPrabhuCall);
+      else migrated.preferenceCollection.calls.unshift(canonicalPrabhuCall);
     }
     migrated.travelDna.confidence ??= 50;
     migrated.travelDna.changes ??= [];
@@ -456,6 +482,7 @@ export class DemoStore {
     const traveler = this.trip.travelers.find((item) => item.id === travelerId);
     if (!traveler || traveler === this.trip.travelers[0]) throw new Error('Choose one friend to negotiate with.');
     const admin = this.trip.travelers[0];
+    const savedCalls = this.trip.preferenceCollection?.calls ?? [];
     // Keep the admin's live brief and the first friend's collected profile available
     // before Friend 2 is called. The live caller is never treated as a known profile.
     const knownProfiles = [
@@ -474,7 +501,12 @@ export class DemoStore {
     this.trip.preferenceCollection = {
       adminName: admin?.name ?? 'Trip admin', adminWeight: 1.5, source, status: 'pending',
       calls: [
-        ...knownProfiles.map((profile) => ({ travelerId: profile.id, name: profile.name, phone: profile.phone ?? '', status: 'completed' as const, happiness: beforeHappiness, topPriorities: (Object.entries(profile.interests) as Array<[Interest, number]>).sort((left, right) => right[1] - left[1]).slice(0, 2).map(([interest]) => interestLabel(interest)), summary: `${profile.name}'s preferences are already available for live comparison.`, compromise: 'Saved context for the live negotiation.' })),
+        ...knownProfiles.map((profile) => {
+          const saved = savedCalls.find((call) => call.travelerId === profile.id && call.status === 'completed');
+          return saved
+            ? { ...saved, name: profile.name, phone: profile.phone ?? saved.phone }
+            : { travelerId: profile.id, name: profile.name, phone: profile.phone ?? '', status: 'completed' as const, happiness: beforeHappiness, topPriorities: (Object.entries(profile.interests) as Array<[Interest, number]>).sort((left, right) => right[1] - left[1]).slice(0, 2).map(([interest]) => interestLabel(interest)), summary: `${profile.name}'s preferences are already available for live comparison.`, compromise: 'Saved context for the live negotiation.' };
+        }),
         { travelerId: traveler.id, name: traveler.name, phone: traveler.phone ?? '', status: source === 'vocal-bridge' ? 'dialing' : 'queued', happiness: beforeHappiness, topPriorities: priorities.slice(0, 2).map(([interest]) => interestLabel(interest)), summary: `JourneyOS will hear ${traveler.name}'s live preference, compare it with the saved profiles, and negotiate only if a conflict emerges.`, compromise: 'Waiting for the traveler to speak.' },
       ],
       negotiation: pendingConflict,
@@ -505,15 +537,22 @@ export class DemoStore {
       ?? savedProfiles[0]
       ?? this.trip.travelers[0];
     if (!traveler || !counterpart) throw new Error('The active negotiation needs both a caller and a saved traveler profile.');
+    const counterpartCall = collection.calls.find((item) => item.travelerId === counterpart.id);
     const constraint = counterpart.foodPreference && counterpart.foodPreference !== 'No preference added' ? counterpart.foodPreference.toLowerCase() : `${counterpart.pacePreference} pace`;
-    const requestedExperience = /night|party|bar|club/i.test(spokenPreference) ? 'nightlife' : /food|dinner|lunch|restaurant|vegan|vegetarian/i.test(spokenPreference) ? 'food' : /photo/i.test(spokenPreference) ? 'photography' : /shop|market/i.test(spokenPreference) ? 'shopping' : /hike|nature|park/i.test(spokenPreference) ? 'nature' : 'requested experience';
+    const isEveningRequest = /night|late|party|bar|club|music|concert|evening/i.test(spokenPreference);
+    const hasEarlyDinner = /early dinner/i.test(counterpartCall?.topPriorities.join(' ') ?? '') || /early dinner/i.test(counterpartCall?.summary ?? '');
+    const dallasDinnerTrade = /dallas/i.test(this.trip.request.destination) && isEveningRequest && hasEarlyDinner;
+    const requestedExperience = /music|concert/i.test(spokenPreference) ? 'live music' : /night|party|bar|club/i.test(spokenPreference) ? 'nightlife' : /food|dinner|lunch|restaurant|vegan|vegetarian/i.test(spokenPreference) ? 'food' : /photo/i.test(spokenPreference) ? 'photography' : /shop|market/i.test(spokenPreference) ? 'shopping' : /hike|nature|park/i.test(spokenPreference) ? 'nature' : 'requested experience';
     const destination = this.trip.request.destination;
     const affectedDay = Math.min(Math.max(1, input.affectedDay ?? agreement.affectedDay), this.trip.request.duration);
     const dayTimes = this.trip.itinerary.filter((item) => item.day === affectedDay && !['stay', 'transport'].includes(item.category)).map((item) => minutesFromTime(item.time)).filter((time) => time < 20 * 60);
     const lastCoreTime = dayTimes.length ? Math.max(...dayTimes) : 16 * 60;
     const sharedTime = timeFromMinutes(Math.min(19 * 60, Math.max(17 * 60, lastCoreTime + 120)));
     const optionalTime = timeFromMinutes(minutesFromTime(sharedTime) + 150);
-    const generatedChanges = input.itineraryChanges?.length ? input.itineraryChanges.map((change, index) => ({ ...change, id: `${agreement.id}-change-${index + 1}` })) : [
+    const generatedChanges = input.itineraryChanges?.length ? input.itineraryChanges.map((change, index) => ({ ...change, id: `${agreement.id}-change-${index + 1}` })) : dallasDinnerTrade ? [
+      { id: `${agreement.id}-shared`, time: '18:00', title: 'Early vegetarian-friendly group dinner', subtitle: `${destination} · protects ${counterpart.name}'s early dinner and pescetarian needs`, category: 'food' as const },
+      { id: `${agreement.id}-optional`, time: '20:00', title: 'Optional live music', subtitle: `${destination} · protects ${traveler.name}'s evening-out priority`, category: 'experience' as const },
+    ] : [
       { id: `${agreement.id}-shared`, time: sharedTime, title: /vegetarian/i.test(constraint) ? 'Vegetarian group dinner' : /vegan/i.test(constraint) ? 'Vegan group dinner' : 'Shared group activity', subtitle: `${destination} · protects ${counterpart.name}'s constraint`, category: 'food' as const },
       { id: `${agreement.id}-optional`, time: optionalTime, title: `Optional ${requestedExperience}`, subtitle: `${destination} · protects ${traveler.name}'s live request`, category: 'experience' as const },
     ];
@@ -522,9 +561,15 @@ export class DemoStore {
     const afterHappiness = Math.min(NEGOTIATION_POLICY.maximumFit, beforeHappiness + Math.max(NEGOTIATION_POLICY.minimumFitGain, Math.ceil(currentFit.fairnessGap / 2)));
     agreement.counterpartId = counterpart.id;
     agreement.counterpartName = counterpart.name;
-    agreement.conflict = input.conflict?.trim() || `${traveler.name}'s live request for ${requestedExperience} competes with ${counterpart.name}'s ${constraint} constraint.`;
-    agreement.rationale = input.rationale?.trim() || `${traveler.name} asked for “${spokenPreference},” while the saved profile says ${counterpart.name} needs ${constraint}. Both can be protected with a shared-first, optional-after sequence.`;
-    agreement.proposal = input.proposal?.trim() || `Schedule ${generatedChanges[0].title.toLowerCase()} at ${generatedChanges[0].time}, then keep ${requestedExperience} optional from ${generatedChanges[1]?.time ?? optionalTime}.`;
+    agreement.conflict = input.conflict?.trim() || (dallasDinnerTrade
+      ? `${traveler.name}'s request for late live music competes with ${counterpart.name}'s early vegetarian-friendly dinner.`
+      : `${traveler.name}'s live request for ${requestedExperience} competes with ${counterpart.name}'s ${constraint} constraint.`);
+    agreement.rationale = input.rationale?.trim() || (dallasDinnerTrade
+      ? `${traveler.name} wants an evening out, while ${counterpart.name} has already asked for an early pescetarian-friendly dinner. Moving the shared dinner late would make both priorities harder to protect.`
+      : `${traveler.name} asked for “${spokenPreference},” while the saved profile says ${counterpart.name} needs ${constraint}. Both can be protected with a shared-first, optional-after sequence.`);
+    agreement.proposal = input.proposal?.trim() || (dallasDinnerTrade
+      ? 'Dinner together around 18:00, followed by optional live music for anyone who wants to continue.'
+      : `Schedule ${generatedChanges[0].title.toLowerCase()} at ${generatedChanges[0].time}, then keep ${requestedExperience} optional from ${generatedChanges[1]?.time ?? optionalTime}.`);
     agreement.affectedDay = affectedDay;
     agreement.beforeHappiness = beforeHappiness;
     agreement.afterHappiness = afterHappiness;
@@ -740,7 +785,7 @@ export class DemoStore {
     if (selectedFlight && selectedHotel) this.recalculateBudget(selectedFlight.price * normalizedRequest.travelers, selectedHotel.totalPrice);
     this.trip.events = [{ id: `brief-${Date.now()}`, type: 'tired', title: `${normalizedRequest.destination} trip brief created`, createdAt: new Date().toISOString(), explanation: `${places.length >= 2 ? 'Google Places sourced real attractions for' : 'A curated route is ready for'} your ${duration}-day ${normalizedRequest.destination} itinerary. Every page now reflects this proposed trip.` }];
     this.trip.groupPreference = { ...this.trip.groupPreference, explanation: `The ${normalizedRequest.destination} route prioritizes ${normalizedRequest.interests.slice(0, 3).join(', ')} while keeping the group’s preferred pace.` };
-    this.trip.preferenceCollection = defaultSarahPreference();
+    this.trip.preferenceCollection = defaultPrabhuPreference();
     this.trip.briefTranscript = briefTranscript;
     this.trip.expenses = [];
     return this.getTrip();

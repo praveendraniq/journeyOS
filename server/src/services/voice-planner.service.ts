@@ -52,10 +52,20 @@ const readDate = (value: string): string | undefined => {
  * of an eventual Vocal Bridge structured conversation response.
  */
 export class VocalBridgeService {
+  private async useConfiguredMainAgent(): Promise<void> {
+    const agentId = config.vocalBridge.agentId?.trim();
+    if (!agentId) throw new Error('VOCAL_BRIDGE_AGENT_ID is not configured on the server.');
+    // `vb call` uses the CLI's selected agent, not an agent ID passed by this
+    // application. Selecting it immediately before dialing prevents a stale
+    // preference-collector or test agent from handling a negotiation call.
+    await run('vb', ['agent', 'use', agentId], { timeout: 10_000 });
+  }
+
   async callNegotiation(traveler: Traveler): Promise<void> {
     const phone = traveler.phone?.trim();
     if (!phone || !/^\+[1-9]\d{7,14}$/.test(phone)) throw new Error(`${traveler.name} needs a valid E.164 phone number before calling.`);
     try {
+      await this.useConfiguredMainAgent();
       await run('vb', ['call', phone, '--name', `${traveler.name} · live negotiation`, '--json'], { timeout: 30_000 });
     } catch (error) {
       const detail = error instanceof Error ? error.message : 'Unknown outbound call error';
@@ -159,6 +169,7 @@ export class VocalBridgeService {
         const phone = input.phones[traveler.id]?.trim();
         if (!phone) throw new Error(`${traveler.name} needs a phone number before a call can be placed.`);
         try {
+          await this.useConfiguredMainAgent();
           // `vb call` is Vocal Bridge's supported outbound-call interface. The
           // selected agent and outbound calling must be configured in its CLI/dashboard.
           await run('vb', ['call', phone, '--name', traveler.name, '--json'], { timeout: 30_000 });

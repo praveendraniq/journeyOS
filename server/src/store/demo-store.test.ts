@@ -19,6 +19,24 @@ test('migrates legacy hydrated state without resetting its destination', () => {
   assert.ok(hydrated.progressState);
 });
 
+test('migrates the legacy Sarah default into Friend 1 Prabhu', () => {
+  const store = new DemoStore();
+  const legacy = store.getTrip();
+  legacy.travelers[0] = { ...legacy.travelers[0], name: 'Prabhu Siddharth', initials: 'PS', phone: '+14156290471' };
+  legacy.travelers[1] = { ...legacy.travelers[1], id: 't-sarah', name: 'Sarah', initials: 'SA', phone: '+14152220000' };
+  legacy.preferenceCollection = {
+    ...legacy.preferenceCollection!,
+    adminName: 'Prabhu Siddharth',
+    calls: [{ ...legacy.preferenceCollection!.calls[0], travelerId: 't-sarah', name: 'Sarah', phone: '+14152220000' }],
+  };
+
+  store.hydrate(legacy);
+  const hydrated = store.getTrip();
+  assert.deepEqual(hydrated.travelers.slice(0, 2).map((traveler) => traveler.name), ['Hema', 'Prabhu Siddharth']);
+  assert.equal(hydrated.travelers[1]?.id, 't-prabhu');
+  assert.equal(hydrated.preferenceCollection?.calls[0]?.travelerId, 't-prabhu');
+});
+
 test('adds and removes travelers, recalculates totals, and invalidates approval', () => {
   const store = new DemoStore();
   const before = store.getTrip();
@@ -55,7 +73,7 @@ test('skip and deterministic reset restore a reproducible demo', () => {
   assert.equal(store.skipStop(stop.id).itinerary.find((item) => item.id === stop.id)?.status, 'skipped');
   const reset = store.reset();
   assert.equal(reset.id, 'trip-tokyo-2026');
-  assert.deepEqual(reset.travelers.map((traveler) => traveler.name), ['Prabhu Siddharth', 'Sarah']);
+  assert.deepEqual(reset.travelers.map((traveler) => traveler.name), ['Hema', 'Prabhu Siddharth']);
   assert.equal(reset.request.destination, 'Tokyo');
   assert.equal(reset.schemaVersion, 2);
 });
@@ -123,8 +141,8 @@ test('four travelers keep the two default profiles and create two editable frien
   const store = new DemoStore();
   const request = store.getTrip().request;
   const updated = store.updateFromRequest({ ...request, travelers: 4 }, [], 'Plan a Tokyo trip for four travelers.');
-  assert.deepEqual(updated.travelers.map((traveler) => traveler.name), ['Prabhu Siddharth', 'Sarah', 'Friend 2', 'Friend 3']);
-  assert.equal(updated.travelers[1].phone, '+14152220000');
+  assert.deepEqual(updated.travelers.map((traveler) => traveler.name), ['Hema', 'Prabhu Siddharth', 'Friend 2', 'Friend 3']);
+  assert.equal(updated.travelers[1].phone, '+14156290471');
   assert.equal(updated.travelers[1].foodPreference, 'Pescetarian food · early dinner');
   assert.deepEqual(updated.preferenceCollection?.calls[0]?.topPriorities, ['Early dinner', 'Moderate walking', 'Pescetarian food']);
 });
@@ -235,11 +253,11 @@ test('contextual itinerary commands target the selected day and can be undone', 
 
 test('discovers a live conflict, negotiates it, and applies it only after admin approval', () => {
   const store = new DemoStore();
-  store.updateFromRequest({ ...store.getTrip().request, travelers: 4 }, [], 'Plan a Tokyo trip for four travelers.');
+  store.updateFromRequest({ ...store.getTrip().request, destination: 'Dallas', travelers: 4 }, [], 'Plan a Dallas trip for four travelers.');
   const friendTwo = store.getTrip().travelers[2];
-  const sarah = store.getTrip().travelers.find((traveler) => traveler.name === 'Sarah');
+  const prabhu = store.getTrip().travelers.find((traveler) => traveler.name === 'Prabhu Siddharth');
   assert.ok(friendTwo);
-  assert.ok(sarah);
+  assert.ok(prabhu);
   const started = store.startNegotiation(friendTwo.id, 'mock');
   const agreement = started.preferenceCollection?.agreement;
   assert.equal(agreement?.status, 'calling');
@@ -247,12 +265,13 @@ test('discovers a live conflict, negotiates it, and applies it only after admin 
   assert.match(agreement?.conflict ?? '', /waiting to hear/i);
   assert.equal(agreement?.itineraryChanges.length, 0);
   assert.equal(started.preferenceCollection?.calls.filter((call) => call.status === 'completed').length, 2);
-  assert.deepEqual(started.preferenceCollection?.calls.filter((call) => call.status === 'completed').map((call) => call.name), ['Prabhu Siddharth', 'Sarah']);
+  assert.deepEqual(started.preferenceCollection?.calls.filter((call) => call.status === 'completed').map((call) => call.name), ['Hema', 'Prabhu Siddharth']);
+  assert.deepEqual(started.preferenceCollection?.calls.find((call) => call.travelerId === 't-prabhu')?.topPriorities, ['Early dinner', 'Moderate walking', 'Pescetarian food']);
 
-  const accepted = store.completeNegotiation({ travelerId: friendTwo.id, accepted: true, statedPreference: 'I want a late live music experience', travelerResponse: 'Yes, that works for me.' });
+  const accepted = store.completeNegotiation({ travelerId: friendTwo.id, accepted: true, statedPreference: 'I really want live music in Dallas and do not want to miss going out in the evening.', travelerResponse: 'Yes, dinner together first and optional live music afterward works for me.' });
   const resolvedAgreement = accepted.preferenceCollection?.agreement;
   assert.equal(resolvedAgreement?.status, 'accepted');
-  assert.equal(resolvedAgreement?.counterpartName, sarah.name);
+  assert.equal(resolvedAgreement?.counterpartName, prabhu.name);
   assert.notEqual(resolvedAgreement?.counterpartId, friendTwo.id);
   assert.match(resolvedAgreement?.conflict ?? '', new RegExp(`${friendTwo.name}.*${resolvedAgreement?.counterpartName}`, 'i'));
   assert.ok((resolvedAgreement?.afterHappiness ?? 0) > (resolvedAgreement?.beforeHappiness ?? 0));
